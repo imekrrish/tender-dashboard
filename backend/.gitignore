@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log*
+*.log
+
+# Runtime-generated working copy of the active workbook.
+# The default template lives in src/data/ and is copied here on boot.
+uploads/
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+.DS_Store
