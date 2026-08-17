@@ -16,12 +16,12 @@ try {
 
   console.log("\n4. Generating unique filter lists...");
   const filters = getUniqueFilterValues(tenders);
-  console.log("   Regions:", filters.regions);
-  console.log("   Countries Count:", filters.countries.length);
+  console.log("   Regions:", filters.region);
+  console.log("   Countries Count:", filters.country ? filters.country.length : 0);
   console.log("   Years Available:", filters.years);
   
   console.log("\n5. Filtering test: Region = Asia");
-  const filtered = filterTenders(tenders, { regions: ["Asia"] });
+  const filtered = filterTenders(tenders, { region: ["Asia"] });
   console.log(`   [PASS] Found ${filtered.length} tenders in Asia (out of ${tenders.length}).`);
 
   console.log("\n6. Aggregating test: Country by Sum of Capacity MW");

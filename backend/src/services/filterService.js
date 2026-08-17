@@ -12,7 +12,8 @@ export function filterTenders(tenders, filtersInput) {
   const metadata = getExcelMetadata();
   const columns = metadata.columns;
   
-  return tenders.filter(({ normalized }) => {
+  return tenders.filter(item => {
+    const normalized = item.normalized || item;
     for (const [key, filterVal] of Object.entries(filtersInput)) {
       if (filterVal === null || filterVal === undefined) continue;
 
@@ -103,7 +104,8 @@ export function getUniqueFilterValues(tenders) {
   });
 
   // Extract unique values
-  tenders.forEach(({ normalized }) => {
+  tenders.forEach(item => {
+    const normalized = item.normalized || item;
     filterableColumns.forEach(col => {
       const val = normalized[col.key];
       if (val !== null && val !== undefined && val !== '') {
@@ -120,7 +122,8 @@ export function getUniqueFilterValues(tenders) {
 
   // Accumulate years from all date fields
   const yearsSet = new Set();
-  tenders.forEach(({ normalized }) => {
+  tenders.forEach(item => {
+    const normalized = item.normalized || item;
     dateColumns.forEach(col => {
       const yr = normalized[`${col.key}Year`];
       if (yr !== null && yr !== undefined && !isNaN(yr)) {
