@@ -11,6 +11,7 @@ import {
   queryTenders,
 } from '../services/api';
 import type { ExcelMetadata } from '../services/api';
+import type { ModuleId } from '../components/layout/ModuleSwitcher';
 import { Loader2, AlertCircle, CheckCircle2, Info } from 'lucide-react';
 
 interface Toast {
@@ -19,7 +20,12 @@ interface Toast {
   type: 'success' | 'error' | 'info';
 }
 
-export const Dashboard: React.FC = () => {
+interface DashboardProps {
+  activeModule: ModuleId;
+  onModuleChange: (id: ModuleId) => void;
+}
+
+export const Dashboard: React.FC<DashboardProps> = ({ activeModule, onModuleChange }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isQuerying, setIsQuerying] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -234,6 +240,9 @@ export const Dashboard: React.FC = () => {
           uploadedFileName={metadata.fileName}
           onRefresh={() => loadDashboardSchema(true)}
           isRefreshing={isQuerying}
+          subtitle="Solar tender & auction intelligence"
+          activeModule={activeModule}
+          onModuleChange={onModuleChange}
         />
       }
       sidebar={

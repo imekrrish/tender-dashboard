@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import excelRouter from './routes/excelRoutes.js';
 import tenderRouter from './routes/tenderRoutes.js';
 import exportRouter from './routes/exportRoutes.js';
+import priceIndexRouter from './routes/priceIndexRoutes.js';
 import { getNews } from './controllers/tenderController.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -54,6 +55,7 @@ app.use(express.json());
 app.use('/api/excel', excelRouter);
 app.use('/api/tenders', tenderRouter);
 app.use('/api/export', exportRouter);
+app.use('/api/price-index', priceIndexRouter);
 app.get('/api/news', getNews);
 
 // Health check endpoint

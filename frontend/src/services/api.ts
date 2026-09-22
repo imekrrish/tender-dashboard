@@ -1,4 +1,9 @@
 import axios from 'axios';
+import type {
+  PriceIndexFilters,
+  PriceIndexMeta,
+  PriceIndexQueryResult,
+} from '../types/priceIndex';
 
 // Backend origin is provided at build time via VITE_API_URL (e.g. the Railway URL).
 // Falls back to the local dev server. A trailing slash and/or "/api" suffix are
@@ -111,4 +116,37 @@ export const exportCsv = async (payload: {
   link.click();
   document.body.removeChild(link);
   window.URL.revokeObjectURL(url);
+};
+
+// ---------------------------------------------------------------------------
+// TaiyangNews PV Price Index
+// ---------------------------------------------------------------------------
+
+export const getPriceIndexMeta = async (): Promise<PriceIndexMeta> => {
+  const response = await api.get<PriceIndexMeta>('/price-index/meta');
+  return response.data;
+};
+
+export const queryPriceIndex = async (
+  filters: Partial<PriceIndexFilters>
+): Promise<PriceIndexQueryResult> => {
+  const response = await api.post<PriceIndexQueryResult>('/price-index/query', filters);
+  return response.data;
+};
+
+export const uploadPriceIndexFile = async (
+  file: File
+): Promise<{
+  success: boolean;
+  fileName: string;
+  latestDate: string;
+  totalWeeks: number;
+  seriesCount: number;
+}> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await api.post('/price-index/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return response.data;
 };
