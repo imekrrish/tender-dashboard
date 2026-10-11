@@ -22,3 +22,9 @@ test('CSV cells quote newlines and neutralize spreadsheet formulas',()=> {
  assert.equal(csvCell('=HYPERLINK("bad")'),'"\'=HYPERLINK(""bad"")"');
  assert.equal(csvCell('a\nb'),'"a\nb"');assert.equal(csvCell(null),'""');
 });
+
+test('multiple product selections are individually validated and bound',()=> {
+ const ids=['12345678-1234-1234-1234-123456789abc','abcdefab-1234-1234-1234-123456789abc'];
+ const f=filterSql({product_ids:ids.join(',')});assert.match(f.where,/t.product_id IN \(\$2,\$3\)/);assert.deepEqual(f.values,['Open',...ids]);
+ assert.throws(()=>filterSql({product_ids:ids[0]+',broken'}));
+});

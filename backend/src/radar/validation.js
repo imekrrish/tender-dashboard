@@ -34,6 +34,13 @@ export function filterSql(filters = {}) {
   const status = filters.status || 'Open';
   if (status !== 'All') { if (!statuses.includes(status)) invalid('Invalid status filter'); add('t.current_status = ?',status); }
   for (const [key,col] of Object.entries({product_id:'t.product_id',scope_id:'t.scope_id',country_id:'t.country_id',authority_id:'t.authority_id',region_id:'c.region_id'})) if (filters[key]) add(`${col} = ?`,uuid(filters[key]));
+  if (filters.product_ids) {
+    if (typeof filters.product_ids !== 'string' || filters.product_ids.length > 4000) invalid('Invalid product selection');
+    const ids = [...new Set(filters.product_ids.split(',').map(uuid))];
+    if (ids.length > 100) invalid('Too many product selections');
+    values.push(...ids);
+    clauses.push(`t.product_id IN (${ids.map((_,i)=>`$${values.length-ids.length+i+1}`).join(',')})`);
+  }
   if (filters.search) { if (typeof filters.search !== 'string' || filters.search.length > 200) invalid('Invalid search'); add("concat_ws(' ',t.tender_id,t.ref_number,t.title) ILIKE ?",`%${filters.search.replace(/[\\%_]/g,'\\$&')}%`); }
   return { where: clauses.join(' AND '), values };
 }

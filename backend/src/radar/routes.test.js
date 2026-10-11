@@ -32,6 +32,8 @@ test('HTTP API denies anonymous writes, persists catalog CRUD and filters databa
   await create('eligibility',{tender_id:tender.id,emd_amount:12000});
   const populated=await request('/tenders?search=TEST001');assert.equal(populated.status,200,await populated.clone().text());const data=await populated.json();
   assert.equal(data.summary.total,1);assert.equal(Number(data.summary.solar_mw),100);assert.equal(Number(data.summary.storage_mwh),200);assert.equal(data.data[0].country,'India');
+  const multi=await request('/tenders?product_ids='+product.product_id);assert.equal(multi.status,200);assert.equal((await multi.json()).summary.total,1);
+  assert.equal((await request('/tenders?product_ids='+product.product_id+',bad')).status,400);
   const detail=await (await request('/tenders/'+tender.id)).json();assert.equal(Number(detail.eligibility.emd_amount),12000);
   const exported=await request('/export.csv?search=TEST001');assert.equal(exported.status,200);assert.match(await exported.text(),/TEST001/);
   assert.equal((await request('/admin/regions/'+region.region_id,'DELETE')).status,409);

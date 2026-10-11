@@ -33,8 +33,8 @@ Frontend deployment remains the existing Vite workflow; set `VITE_API_URL` to th
 
 ## Pending source inputs
 
-- Original `Tenders New Design 5.html`: only its pasted visible text was supplied, so layout and behavior beyond that text are not claimed to match exactly.
-- Exact Futurescope URL or screenshots: initial styling uses a restrained light dashboard, white cards and blue/teal accents based on prior project direction. The supplied screenshots identify Tender Zen as an additional reference.
+- Original `Tenders New Design 5.html` has been reviewed: product multi-select checkboxes, the right-hand intelligence drawer, header bid count and resource-specific master columns are implemented with database values. The prototype’s hardcoded sample records and KPI values are not used.
+- Tender Zen reference (`https://www.tenderzen.de/en`) has been reviewed for layout inspiration. The UI uses soft surfaces, clear typography, more spacing and distinct TaiyangNews teal accents. Exact Futurescope URL/screenshots are still pending. No Tender Zen AI agent features or marketing content are implied by this styling reference.
 - Udaya's Excel: will be used for a one-time mapped database import, not as the live data source. Import column mappings and deduplication must be checked against the actual workbook.
 - Production DB URL: needed for real PostgreSQL integration verification and deployment.
 - Document storage: individual HTTP(S) document links are supported. Uploads, private bucket signing and ZIP downloads await bucket/access details and are not yet implemented.
