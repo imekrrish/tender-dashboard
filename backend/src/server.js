@@ -1,4 +1,5 @@
 import express from 'express';
+import radarRouter from './radar/router.js';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
@@ -53,6 +54,8 @@ app.use(express.json());
 
 // 2. Map route namespaces
 app.use('/api/excel', excelRouter);
+app.use('/api/radar', radarRouter);
+// Legacy auction endpoints remain isolated from the database-backed procurement radar.
 app.use('/api/tenders', tenderRouter);
 app.use('/api/export', exportRouter);
 app.use('/api/price-index', priceIndexRouter);
@@ -66,7 +69,7 @@ app.get('/api/health', (req, res) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled Express Server Error:', err);
-  res.status(500).json({ error: 'Internal Server Error', message: err.message });
+  res.status(500).json({ error: 'Internal Server Error', message: 'Request failed' });
 });
 
 app.listen(PORT, () => {

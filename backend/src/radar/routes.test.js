@@ -1,0 +1,42 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import express from 'express';
+import { newDb } from 'pg-mem';
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+process.env.DATABASE_URL='postgres://unused';
+process.env.ADMIN_API_KEY='test-key';
+const {pool}=await import('../db/pool.js');
+const {default:router}=await import('./router.js');
+test('HTTP API denies anonymous writes, persists catalog CRUD and filters database records',async()=> {
+ const db=newDb();db.registerExtension('pgcrypto',s=>s.registerFunction({name:'gen_random_uuid',returns:'uuid',implementation:randomUUID,impure:true}));
+ db.public.none(await readFile(new URL('../db/001_procurement.sql',import.meta.url),'utf8'));
+ const adapter=new (db.adapters.createPg().Pool)();pool.query=async (...args)=>{try{return await adapter.query(...args);}catch(e){if(/foreign key|still referenced/i.test(e.message))e.code='23503';throw e;}};
+ const app=express();app.use(express.json());app.use('/api/radar',router);const server=app.listen(0,'127.0.0.1');
+ await new Promise(resolve=>server.once('listening',resolve));const origin=`http://127.0.0.1:${server.address().port}/api/radar`;
+ const request=(url,method='GET',body,auth=true)=>fetch(origin+url,{method,headers:{'Content-Type':'application/json',...(auth?{Authorization:'Bearer test-key'}:{})},body:body?JSON.stringify(body):undefined});
+ try {
+  assert.equal((await request('/admin/regions','POST',{code:'SA',name:'South Asia'},false)).status,401);
+  let response=await request('/admin/regions','POST',{code:'SA',name:'South Asia'});assert.equal(response.status,201);const region=await response.json();
+  assert.equal((await request('/admin/regions','POST',{code:'SA',name:'Duplicate'})).status,409);
+  const catalogs=await (await request('/catalogs')).json();assert.equal(catalogs.regions[0].name,'South Asia');
+  response=await request('/admin/regions/'+region.region_id,'PUT',{name:'Updated Region'});assert.equal((await response.json()).name,'Updated Region');
+  assert.equal((await request('/tenders?country_id=invalid')).status,400);
+  const list=await request('/tenders');assert.equal(list.status,200);assert.equal((await list.json()).summary.total,0);
+  const create=async(resource,body)=>{const r=await request('/admin/'+resource,'POST',body);assert.equal(r.status,201,await r.clone().text());return r.json();};
+  const country=await create('countries',{region_id:region.region_id,iso_code:'IN',name:'India'});
+  const product=await create('products',{code:'FPV_BESS',name:'Floating Solar + BESS'});
+  const scope=await create('scopes',{code:'EPC',name:'Turnkey EPC'});
+  const authority=await create('authorities',{code:'TEST',name:'Test Authority',country_id:country.country_id});
+  const tender=await create('tenders',{tender_id:'TEST001',title:'Solar Test',authority_id:authority.authority_id,scope_id:scope.scope_id,product_id:product.product_id,country_id:country.country_id,state:'Test State',tender_open_date:'2026-10-01',tender_close_date:'2026-10-30T12:00:00Z',total_capacity_mw:100,storage_capacity_mwh:200,storage_capacity_mw:50,pv_type:'Floating Solar'});
+  await create('eligibility',{tender_id:tender.id,emd_amount:12000});
+  const populated=await request('/tenders?search=TEST001');assert.equal(populated.status,200,await populated.clone().text());const data=await populated.json();
+  assert.equal(data.summary.total,1);assert.equal(Number(data.summary.solar_mw),100);assert.equal(Number(data.summary.storage_mwh),200);assert.equal(data.data[0].country,'India');
+  const detail=await (await request('/tenders/'+tender.id)).json();assert.equal(Number(detail.eligibility.emd_amount),12000);
+  const exported=await request('/export.csv?search=TEST001');assert.equal(exported.status,200);assert.match(await exported.text(),/TEST001/);
+  assert.equal((await request('/admin/regions/'+region.region_id,'DELETE')).status,409);
+  await request('/admin/tenders/'+tender.id,'DELETE');await request('/admin/authorities/'+authority.authority_id,'DELETE');await request('/admin/countries/'+country.country_id,'DELETE');
+
+  assert.equal((await request('/admin/regions/'+region.region_id,'DELETE')).status,204);
+ } finally {await new Promise(resolve=>server.close(resolve));await adapter.end();await pool.end();}
+});

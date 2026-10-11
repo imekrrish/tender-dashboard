@@ -17,16 +17,17 @@ Deploy the **backend first** so you have its public URL for the frontend env var
 2. Railway → **New Project → Deploy from GitHub repo** → pick this repo.
 3. In the service **Settings**:
    - **Root Directory:** `backend`
-   - Start command is auto-detected from `railway.json` (`npm start`); Node ≥ 18 from `package.json` engines.
+   - Start command is auto-detected from `railway.json` (`npm start`); Node ≥ 22 from `package.json` engines.
    - Railway injects `PORT` automatically — the server already reads `process.env.PORT`.
 4. (Optional, recommended) **Variables** → add `CORS_ORIGIN` = your Vercel URL
    once you have it, e.g. `https://tender-dashboard.vercel.app`. Comma-separate
    multiple origins. Leave unset to allow all origins.
-5. Deploy. Confirm health: open `https://<your-app>.up.railway.app/api/health`
-   → should return `{"status":"OK",...}`.
+5. Add a PostgreSQL service and set `DATABASE_URL` to its connection string. Set `ADMIN_API_KEY` to a long random value. The Railway pre-deploy command runs `npm run migrate`; it is versioned and safe to rerun.
+6. Deploy. Confirm database health: open `https://<your-app>.up.railway.app/api/radar/health`
+   → should return `{"status":"OK","source":"PostgreSQL"}`.
 6. Copy the public URL — you'll need it for the frontend.
 
-> **Note on uploads:** Railway's filesystem is ephemeral. An uploaded workbook
+> **Legacy auction / price-index uploads only:** Railway's filesystem is ephemeral. An uploaded workbook
 > lives only until the next restart/redeploy, after which the app falls back to
 > the bundled default database (`backend/src/data/…xlsx`). For permanent uploads,
 > attach a Railway Volume mounted at `backend/uploads` (or move storage to a

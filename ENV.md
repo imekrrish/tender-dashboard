@@ -11,11 +11,13 @@ Add these in your Railway **service → Variables** tab.
 
 | Key | Value | Required | Notes |
 |-----|-------|----------|-------|
+| `DATABASE_URL` | PostgreSQL connection string | ✅ Yes | Server-only secret; never put it in frontend variables. |
+| `ADMIN_API_KEY` | Long random access key | ✅ For admin | Server-only config; entered at runtime in the admin interface. |
 | `PORT` | *(do not set)* | ❌ | Railway injects this automatically; the server reads `process.env.PORT`. |
 | `CORS_ORIGIN` | `https://your-app.vercel.app` | ⚪ Optional | Locks CORS to your frontend. Comma-separate multiple origins. Defaults to `*` (allow all) if unset. |
 | `NODE_ENV` | `production` | ⚪ Optional | — |
 
-> The backend boots with **zero** variables set (uses `*` CORS + the auto `PORT`).
+> The procurement radar requires `DATABASE_URL`, schema migration and `ADMIN_API_KEY` for admin writes. Without a database, radar endpoints return 503; legacy modules still boot.
 > `CORS_ORIGIN` is only to tighten access once you know the Vercel domain.
 
 **Also required in the service Settings (not a variable):**
