@@ -359,6 +359,56 @@
       "type": "VARCHAR(100)",
       "required": false,
       "generated": true
+    },
+    "site_address": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "postal_code": {
+      "type": "VARCHAR(20)",
+      "required": false,
+      "generated": false
+    },
+    "city": {
+      "type": "VARCHAR(100)",
+      "required": false,
+      "generated": false
+    },
+    "latitude": {
+      "type": "NUMERIC(9,6)",
+      "required": false,
+      "generated": false
+    },
+    "longitude": {
+      "type": "NUMERIC(9,6)",
+      "required": false,
+      "generated": false
+    },
+    "map_zoom_level": {
+      "type": "INT",
+      "required": false,
+      "generated": false
+    },
+    "analysis_tags": {
+      "type": "TEXT[]",
+      "required": false,
+      "generated": false
+    },
+    "primary_category": {
+      "type": "VARCHAR(255)",
+      "required": false,
+      "generated": false
+    },
+    "import_source": {
+      "type": "VARCHAR(100)",
+      "required": false,
+      "generated": true
+    },
+    "source_data": {
+      "type": "JSONB",
+      "required": false,
+      "generated": true
     }
   },
   "tender_eligibility": {
@@ -446,6 +496,26 @@
       "type": "INT",
       "required": false,
       "generated": false
+    },
+    "technical_track_record_text": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "performance_bg_terms": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "estimated_project_value_terms": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "source_data": {
+      "type": "JSONB",
+      "required": false,
+      "generated": true
     }
   },
   "tender_documents": {
@@ -481,6 +551,11 @@
     },
     "uploaded_at": {
       "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": true
+    },
+    "source_data": {
+      "type": "JSONB",
       "required": false,
       "generated": true
     }

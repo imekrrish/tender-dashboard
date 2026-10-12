@@ -21,7 +21,7 @@ In another terminal, run `npm ci` and `npm run dev` in `frontend/`. Vite proxies
 
 Run `npm run migrate` once against a new database. Version tracking, a transaction and an advisory lock prevent duplicate migration execution. Existing databases that already contain these table names need a schema reconciliation before applying migration 001.
 
-Admin access uses a server-configured bearer key entered in the UI and retained in React memory only. It is a shared administrator credential, not individual user accounts. Create catalogs first: regions → countries → products / scopes → authorities → tenders → eligibility / documents / corrigenda. Delete operations ask for confirmation; referenced catalogs cannot be deleted. Audit timestamps are server-controlled; editor attribution currently uses `admin`.
+Admin access uses a server-configured 4-digit PIN entered in the UI and retained in React memory only. Five incorrect attempts from the same client address block retries for five minutes; this limiter is in-memory per server instance. It is a shared administrator credential, not individual user accounts. Create catalogs first: regions → countries → products / scopes → authorities → tenders → eligibility / documents / corrigenda. Delete operations ask for confirmation; referenced catalogs cannot be deleted. Audit timestamps are server-controlled; editor attribution currently uses `admin`.
 
 Public reads exclude Draft tenders. Dashboard filtering and CSV export default to Open, use the same SQL conditions and sort by due date. KPI totals cover the entire filtered dataset, not just the displayed page. Pure BESS product code must be `BESS` to exclude its MW rating from solar totals. Expiring bids must be Open or Under Pre-Bid, not expired, and due strictly within the next 14 days. Deadlines display in the viewer's local timezone with a timezone label.
 
@@ -35,7 +35,7 @@ The root `railway.json` runs `npm run migrate` before deployment and checks `/ap
 
 - Original `Tenders New Design 5.html` has been reviewed: product multi-select checkboxes, the right-hand intelligence drawer, header bid count and resource-specific master columns are implemented with database values. The prototype’s hardcoded sample records and KPI values are not used.
 - Tender Zen reference (`https://www.tenderzen.de/en`) has been reviewed for layout inspiration. The UI uses soft surfaces, clear typography, more spacing and distinct TaiyangNews teal accents. Exact Futurescope URL/screenshots are still pending. No Tender Zen AI agent features or marketing content are implied by this styling reference.
-- Udaya's Excel: will be used for a one-time mapped database import, not as the live data source. Import column mappings and deduplication must be checked against the actual workbook.
+- Udaya's `Tenders dump.xlsx` has been reconciled from its last two DB_Samples sheets. See `IMPORT_TENDERS.md`; the explicit one-time import is prepared and defaults to dry-run. Live loading still requires the DB connection.
 - Production DB URL: needed for real PostgreSQL integration verification and deployment.
 - Document storage: individual HTTP(S) document links are supported. Uploads, private bucket signing and ZIP downloads await bucket/access details and are not yet implemented.
 - Charts: await the supplied charts; current KPIs use database totals. Phase 2 tariff benchmarking and multi-winner reporting are future work.
