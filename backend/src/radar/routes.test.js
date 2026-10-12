@@ -11,6 +11,7 @@ const {default:router}=await import('./router.js');
 test('HTTP API denies anonymous writes, persists catalog CRUD and filters database records',async()=> {
  const db=newDb();db.registerExtension('pgcrypto',s=>s.registerFunction({name:'gen_random_uuid',returns:'uuid',implementation:randomUUID,impure:true}));
  db.public.none(await readFile(new URL('../db/001_procurement.sql',import.meta.url),'utf8'));
+ db.public.none(await readFile(new URL('../db/002_source_fields.sql',import.meta.url),'utf8'));
  const adapter=new (db.adapters.createPg().Pool)();pool.query=async (...args)=>{try{return await adapter.query(...args);}catch(e){if(/foreign key|still referenced/i.test(e.message))e.code='23503';throw e;}};
  const app=express();app.use(express.json());app.use('/api/radar',router);const server=app.listen(0,'127.0.0.1');
  await new Promise(resolve=>server.once('listening',resolve));const origin=`http://127.0.0.1:${server.address().port}/api/radar`;

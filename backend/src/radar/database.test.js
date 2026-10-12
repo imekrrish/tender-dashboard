@@ -7,6 +7,7 @@ test('specification migration creates relational schema and enforces dependencie
  const db=newDb();
  db.registerExtension('pgcrypto',schema=>schema.registerFunction({name:'gen_random_uuid',returns:'uuid',implementation:randomUUID,impure:true}));
  db.public.none(await readFile(new URL('../db/001_procurement.sql',import.meta.url),'utf8'));
+ db.public.none(await readFile(new URL('../db/002_source_fields.sql',import.meta.url),'utf8'));
  const region=db.public.one("INSERT INTO master_regions(code,name) VALUES ('SA','South Asia') RETURNING *");
  const country=db.public.one(`INSERT INTO master_countries(region_id,iso_code,name) VALUES ('${region.region_id}','IN','India') RETURNING *`);
  assert.equal(country.name,'India');

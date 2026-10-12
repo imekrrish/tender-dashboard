@@ -8,7 +8,8 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "migrate": "node src/db/migrate.js",
-    "test": "node --test src/radar/*.test.js"
+    "test": "node --test src/radar/*.test.js",
+    "import:tenders": "node src/imports/import-tenders.js"
   },
   "engines": {
     "node": ">=22"

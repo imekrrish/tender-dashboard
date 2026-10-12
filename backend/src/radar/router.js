@@ -36,7 +36,7 @@ const joins = `FROM tenders t JOIN master_countries c ON c.country_id=t.country_
  LEFT JOIN tender_eligibility e ON e.tender_id=t.id`;
 const columns = `t.*, c.name AS country, r.name AS region, p.name AS product, p.code AS product_code,
  s.name AS scope, a.name AS authority, e.emd_currency,e.emd_amount,e.desired_turnover,
- e.min_installed_capacity_mw,e.manufacturer,e.certifications,e.ld_clause`;
+ e.min_installed_capacity_mw,e.technical_track_record_text,e.manufacturer,e.certifications,e.ld_clause`;
 router.get('/tenders',run(async (req,res) => {
   const {where,values} = filterSql(req.query);
   const limit = Number(req.query.limit || 50), offset = Number(req.query.offset || 0);
@@ -44,6 +44,7 @@ router.get('/tenders',run(async (req,res) => {
   const [data, summary] = await Promise.all([
     pool.query(`SELECT ${columns} ${joins} WHERE ${where} ORDER BY t.tender_close_date,t.id LIMIT $${values.length+1} OFFSET $${values.length+2}`,[...values,limit,offset]),
     pool.query(`SELECT count(*)::int AS total,
+    count(*) FILTER (WHERE t.import_source = 'udaya-db-samples-2026-10-12')::int AS imported_samples,
     coalesce(sum(CASE WHEN p.code <> 'BESS' THEN t.total_capacity_mw ELSE 0 END),0) AS solar_mw,
     coalesce(sum(t.storage_capacity_mwh),0) AS storage_mwh,
     coalesce(sum(t.storage_capacity_mw),0) AS storage_mw,

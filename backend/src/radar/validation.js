@@ -13,10 +13,12 @@ export function validate(table, input, partial = false) {
     if (!field || field.generated) invalid(`Field ${key} cannot be written`);
     if (value === null) { if (field.required) invalid(`${key} is required`); out[key] = null; continue; }
     const type = field.type;
-    if (type === 'UUID') uuid(value);
-    else if (/NUMERIC|INT/.test(type)) { if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || (type === 'INT' && !Number.isInteger(value))) invalid(`${key} must be a nonnegative number`); if (key.endsWith('_pct') && value > 100) invalid(`${key} must be at most 100`); }
+    if (type === 'TEXT[]') {if (!Array.isArray(value) || value.length>100 || value.some(v=>typeof v!=='string'||v.length>255)) invalid(`${key} must be a list of short strings`);}
+    else if (type === 'UUID') uuid(value);
+    else if (/NUMERIC|INT/.test(type)) { if (typeof value !== 'number' || !Number.isFinite(value) || (value < 0 && !['latitude','longitude'].includes(key)) || (type === 'INT' && !Number.isInteger(value))) invalid(`${key} must be a nonnegative number`); if (key.endsWith('_pct') && value > 100) invalid(`${key} must be at most 100`); }
     else if (type === 'BOOLEAN') { if (typeof value !== 'boolean') invalid(`${key} must be boolean`); }
     else if (typeof value !== 'string' || !value.trim()) invalid(`${key} must be nonempty text`);
+    if (key==='latitude' && Math.abs(value)>90 || key==='longitude' && Math.abs(value)>180) invalid('Invalid coordinates');
     if (type.startsWith('VARCHAR') && value.length > Number(type.match(/\d+/)[0])) invalid(`${key} is too long`);
     if (/DATE|TIMESTAMPTZ/.test(type) && Number.isNaN(Date.parse(value))) invalid(`${key} must be a valid date`);
     if (type === 'tender_status_enum' && !statuses.includes(value)) invalid('Invalid tender status');

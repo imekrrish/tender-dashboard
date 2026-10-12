@@ -35,7 +35,7 @@ The root `railway.json` runs `npm run migrate` before deployment and checks `/ap
 
 - Original `Tenders New Design 5.html` has been reviewed: product multi-select checkboxes, the right-hand intelligence drawer, header bid count and resource-specific master columns are implemented with database values. The prototype’s hardcoded sample records and KPI values are not used.
 - Tender Zen reference (`https://www.tenderzen.de/en`) has been reviewed for layout inspiration. The UI uses soft surfaces, clear typography, more spacing and distinct TaiyangNews teal accents. Exact Futurescope URL/screenshots are still pending. No Tender Zen AI agent features or marketing content are implied by this styling reference.
-- Udaya's Excel: will be used for a one-time mapped database import, not as the live data source. Import column mappings and deduplication must be checked against the actual workbook.
+- Udaya's `Tenders dump.xlsx` has been reconciled from its last two DB_Samples sheets. See `IMPORT_TENDERS.md`; the explicit one-time import is prepared and defaults to dry-run. Live loading still requires the DB connection.
 - Production DB URL: needed for real PostgreSQL integration verification and deployment.
 - Document storage: individual HTTP(S) document links are supported. Uploads, private bucket signing and ZIP downloads await bucket/access details and are not yet implemented.
 - Charts: await the supplied charts; current KPIs use database totals. Phase 2 tariff benchmarking and multi-winner reporting are future work.
