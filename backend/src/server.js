@@ -1,4 +1,5 @@
 import express from 'express';
+import { serveFrontend } from './frontend.js';
 import radarRouter from './radar/router.js';
 import cors from 'cors';
 import fs from 'fs';
@@ -39,15 +40,13 @@ try {
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// CORS: allow all by default; set CORS_ORIGIN to a comma-separated list of
-// allowed origins (e.g. your Vercel URL) to lock it down in production.
-const corsEnv = (process.env.CORS_ORIGIN || '*').trim();
-const allowedOrigins = corsEnv === '*' ? '*' : corsEnv.split(',').map((o) => o.trim());
-
-app.use(cors({
-  origin: allowedOrigins,
+// Browser calls use the same origin in the combined Railway service.
+// CORS is needed only if explicitly allowing a separate client.
+const corsEnv = process.env.CORS_ORIGIN?.trim();
+if (corsEnv) app.use(cors({
+  origin: corsEnv === '*' ? '*' : corsEnv.split(',').map(o => o.trim()),
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
 app.use(express.json());
@@ -66,12 +65,14 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+serveFrontend(app, path.resolve(__dirname, '../../frontend/dist'));
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled Express Server Error:', err);
   res.status(500).json({ error: 'Internal Server Error', message: 'Request failed' });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
 });

@@ -1,56 +1,15 @@
-# Environment variables
+# Railway environment variables — combined frontend + backend
 
-Two apps, deployed separately. Set the **backend** up first (Railway), copy its
-public URL, then set the **frontend** (Vercel) to point at it.
+Set these on the single **application service**:
 
----
+| Variable | Value | Required |
+|---|---|---|
+| `DATABASE_URL` | Your PostgreSQL connection URL, or `${{Postgres.DATABASE_URL}}` when the database service is named `Postgres` | Yes |
+| `ADMIN_API_KEY` | A unique long random secret; generate with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` | Yes, to use admin CRUD |
+| `NODE_ENV` | `production` | Set explicitly; also the Docker default |
 
-## Backend — Railway
+Railway supplies `PORT`; do not set it manually. Do not set `VITE_API_URL` or `CORS_ORIGIN` for the combined service. Frontend requests use same-origin `/api`, so there are no frontend environment variables to configure. Remove any old `VITE_API_URL` values and stale build/start/root-directory overrides from the application service.
 
-Add these in your Railway **service → Variables** tab.
+`CORS_ORIGIN` remains optional for a deliberately separate client, not this deployment. `ADMIN_API_KEY` is entered in the site's admin screen; it is never compiled into the frontend.
 
-| Key | Value | Required | Notes |
-|-----|-------|----------|-------|
-| `DATABASE_URL` | PostgreSQL connection string | ✅ Yes | Server-only secret; never put it in frontend variables. |
-| `ADMIN_API_KEY` | Long random access key | ✅ For admin | Server-only config; entered at runtime in the admin interface. |
-| `PORT` | *(do not set)* | ❌ | Railway injects this automatically; the server reads `process.env.PORT`. |
-| `CORS_ORIGIN` | `https://your-app.vercel.app` | ⚪ Optional | Locks CORS to your frontend. Comma-separate multiple origins. Defaults to `*` (allow all) if unset. |
-| `NODE_ENV` | `production` | ⚪ Optional | — |
-
-> The procurement radar requires `DATABASE_URL`, schema migration and `ADMIN_API_KEY` for admin writes. Without a database, radar endpoints return 503; legacy modules still boot.
-> `CORS_ORIGIN` is only to tighten access once you know the Vercel domain.
-
-**Also required in the service Settings (not a variable):**
-`Root Directory = backend`
-
----
-
-## Frontend — Vercel
-
-Add this in your Vercel **Project → Settings → Environment Variables**.
-
-| Key | Value | Required | Notes |
-|-----|-------|----------|-------|
-| `VITE_API_URL` | `https://your-backend.up.railway.app` | ✅ Yes | Your Railway public URL. **No trailing slash, no `/api`** — the app appends `/api` itself. Falls back to `http://localhost:5000` if unset. |
-
-> ⚠️ `VITE_*` values are baked in at **build time**. If you add or change
-> `VITE_API_URL` after a deploy, you must **redeploy** the frontend for it to take effect.
-
-**Also required in Project Settings (not a variable):**
-`Root Directory = frontend`
-
----
-
-## Copy-paste
-
-**Railway (backend):**
-```
-CORS_ORIGIN=https://your-app.vercel.app
-```
-
-**Vercel (frontend):**
-```
-VITE_API_URL=https://your-backend.up.railway.app
-```
-
-Replace both URLs with your real deployment URLs.
+If using an external database, use its provider-approved PostgreSQL URL including required SSL options. The application does not disable certificate validation. No other database credentials or pool variables are required.

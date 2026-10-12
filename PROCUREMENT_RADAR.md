@@ -13,7 +13,7 @@ npm run migrate
 npm start
 ```
 
-In another terminal, set `VITE_API_URL=http://localhost:5000`, then run `npm ci` and `npm run dev` in `frontend/`. Environment example files are documentation; the server reads environment variables and does not load `.env` automatically.
+In another terminal, run `npm ci` and `npm run dev` in `frontend/`. Vite proxies `/api` to port 5000. Environment example files are documentation; the server reads environment variables and does not load `.env` automatically.
 
 ## Database and administration
 
@@ -27,9 +27,9 @@ Public reads exclude Draft tenders. Dashboard filtering and CSV export default t
 
 ## Railway preparation
 
-Use `backend` as the Railway service root. Configure `DATABASE_URL`, `ADMIN_API_KEY` and `CORS_ORIGIN`. `railway.json` runs the migration before deployment and checks `/api/radar/health`, which verifies database access. No deployment has been performed by this change.
+Deploy from the repository root (`/`), with one Railway app service. The root Dockerfile builds the frontend and installs production backend dependencies. Express serves the frontend and `/api` on the same origin. Configure `DATABASE_URL`, `ADMIN_API_KEY` and `NODE_ENV=production`; do not set `VITE_API_URL` or `CORS_ORIGIN` for this setup. Railway supplies `PORT`.
 
-Frontend deployment remains the existing Vite workflow; set `VITE_API_URL` to the backend origin before building. Database credentials must never be added to `VITE_*` variables.
+The root `railway.json` runs `npm run migrate` before deployment and checks `/api/radar/health`. The runtime starts with `npm start`. A missing production frontend build causes startup to fail explicitly. See `DEPLOYMENT.md` and `ENV.md` for exact settings. No Railway deployment has been performed by this change.
 
 ## Pending source inputs
 
