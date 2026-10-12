@@ -1,0 +1,23 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { newDb } from 'pg-mem';
+test('specification migration creates relational schema and enforces dependencies',async()=> {
+ const db=newDb();
+ db.registerExtension('pgcrypto',schema=>schema.registerFunction({name:'gen_random_uuid',returns:'uuid',implementation:randomUUID,impure:true}));
+ db.public.none(await readFile(new URL('../db/001_procurement.sql',import.meta.url),'utf8'));
+ const region=db.public.one("INSERT INTO master_regions(code,name) VALUES ('SA','South Asia') RETURNING *");
+ const country=db.public.one(`INSERT INTO master_countries(region_id,iso_code,name) VALUES ('${region.region_id}','IN','India') RETURNING *`);
+ assert.equal(country.name,'India');
+ assert.throws(()=>db.public.none(`DELETE FROM master_regions WHERE region_id='${region.region_id}'`));
+ const product=db.public.one("INSERT INTO master_product_segments(code,name) VALUES ('FPV_BESS','Floating Solar + BESS') RETURNING *");
+ const scope=db.public.one("INSERT INTO master_contract_scopes(code,name) VALUES ('EPC','Turnkey EPC') RETURNING *");
+ const authority=db.public.one(`INSERT INTO tendering_authorities(code,name,country_id) VALUES ('TEST','Test Authority','${country.country_id}') RETURNING *`);
+ const tender=db.public.one(`INSERT INTO tenders(tender_id,title,authority_id,scope_id,product_id,country_id,state,tender_open_date,tender_close_date,total_capacity_mw,pv_type) VALUES ('TEST001','Floating Solar Test','${authority.authority_id}','${scope.scope_id}','${product.product_id}','${country.country_id}','Test State','2026-10-01','2026-10-30T12:00:00Z',100,'Floating Solar') RETURNING *`);
+ db.public.none(`INSERT INTO tender_eligibility(tender_id,emd_amount) VALUES ('${tender.id}',12000)`);
+ const row=db.public.one("SELECT * FROM view_taiyang_tender_radar WHERE tender_id='TEST001'");
+ assert.equal(row.country,'India');assert.equal(row.emd_amount,12000);assert.equal(row.product,'Floating Solar + BESS');
+ db.public.none(`DELETE FROM tenders WHERE id='${tender.id}'`);
+ assert.equal(db.public.many('SELECT * FROM tender_eligibility').length,0);
+});

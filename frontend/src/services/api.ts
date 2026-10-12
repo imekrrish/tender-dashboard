@@ -5,16 +5,15 @@ import type {
   PriceIndexQueryResult,
 } from '../types/priceIndex';
 
-// Backend origin is provided at build time via VITE_API_URL (e.g. the Railway URL).
-// Falls back to the local dev server. A trailing slash and/or "/api" suffix are
-// tolerated so it works whether the env value includes them or not.
+// Same-origin /api on Railway; Vite proxies /api locally.
+// VITE_API_URL is an optional override for a separately hosted backend.
 const rawApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
-const origin = (rawApiUrl && rawApiUrl.length > 0 ? rawApiUrl : 'http://localhost:5000')
+const origin = (rawApiUrl && rawApiUrl.length > 0 ? rawApiUrl : '')
   .replace(/\/+$/, '')
   .replace(/\/api$/, '');
 const API_BASE_URL = `${origin}/api`;
 
-const api = axios.create({
+export const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',

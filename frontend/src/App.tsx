@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Dashboard } from './pages/Dashboard';
+import { ProcurementRadar } from './pages/ProcurementRadar';
 import { PriceIndex } from './pages/PriceIndex';
 import type { ModuleId } from './components/layout/ModuleSwitcher';
 import './App.css';
@@ -22,7 +22,7 @@ const App: React.FC = () => {
     return <PriceIndex activeModule={activeModule} onModuleChange={handleModuleChange} />;
   }
 
-  return <Dashboard activeModule={activeModule} onModuleChange={handleModuleChange} />;
+  return <ProcurementRadar onPrices={() => handleModuleChange('priceIndex')} />;
 };
 
 export default App;

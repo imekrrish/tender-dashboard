@@ -1,76 +1,34 @@
-# Deployment guide
+# One Railway app service
 
-Monorepo with two independently deployed apps:
+Frontend and backend deploy together from the repository root. PostgreSQL can be external or an existing Railway database service; it is not bundled into the app container.
 
-| App | Folder | Host | Start |
-|-----|--------|------|-------|
-| Frontend (Vite + React) | `frontend/` | **Vercel** | static build |
-| Backend (Express API) | `backend/` | **Railway** | `npm start` |
+1. Connect `imekrrish/tender-dashboard` to one Railway application service.
+2. Select branch `feat/procurement-radar-db` to test PR #1, or `main` after merging the PR.
+3. Set **Root Directory** to `/` (repository root), not `backend` or `frontend`.
+4. Use **Config File Path** `/railway.json`. Clear old dashboard build/start/pre-deploy overrides. The repository config selects:
+   - Builder: Dockerfile (`Dockerfile` at repository root).
+   - Pre-deploy: `npm run migrate`.
+   - Start: `npm start`.
+   - Health check: `/api/radar/health`.
+5. Add variables from `ENV.md`: `DATABASE_URL`, `ADMIN_API_KEY`, `NODE_ENV=production`. Railway injects `PORT`; the server listens on `0.0.0.0` at that port.
+6. Deploy, then **Networking → Generate Domain**. Let Railway use the application's `PORT` as the target port.
+7. Open `/` for the dashboard and `/api/radar/health` for the database check. Successful readiness returns `{"status":"OK","source":"PostgreSQL"}`.
 
-Deploy the **backend first** so you have its public URL for the frontend env var.
+Docker builds Vite in a separate build stage; the final runtime contains only production backend dependencies and the compiled frontend. API routes run before static files; unknown `/api` paths return JSON 404 errors. SPA deep links serve index.html; missing assets return 404. Hashed assets are cached, while index.html is revalidated.
 
----
+An unconfigured or unreachable DB makes migration/health fail. The migration targets a new database; if the supplied DB already contains the specification tables, reconcile the schema before migration 001. No production DB has been connected or Railway deployment performed yet.
 
-## 1. Backend → Railway
+Legacy auction / price-index Excel uploads remain ephemeral across redeploys unless durable storage is added. Procurement tender data persists in PostgreSQL.
 
-1. Push this repo to GitHub (see [Git setup](#git-setup) below).
-2. Railway → **New Project → Deploy from GitHub repo** → pick this repo.
-3. In the service **Settings**:
-   - **Root Directory:** `backend`
-   - Start command is auto-detected from `railway.json` (`npm start`); Node ≥ 18 from `package.json` engines.
-   - Railway injects `PORT` automatically — the server already reads `process.env.PORT`.
-4. (Optional, recommended) **Variables** → add `CORS_ORIGIN` = your Vercel URL
-   once you have it, e.g. `https://tender-dashboard.vercel.app`. Comma-separate
-   multiple origins. Leave unset to allow all origins.
-5. Deploy. Confirm health: open `https://<your-app>.up.railway.app/api/health`
-   → should return `{"status":"OK",...}`.
-6. Copy the public URL — you'll need it for the frontend.
+## Local checks
 
-> **Note on uploads:** Railway's filesystem is ephemeral. An uploaded workbook
-> lives only until the next restart/redeploy, after which the app falls back to
-> the bundled default database (`backend/src/data/…xlsx`). For permanent uploads,
-> attach a Railway Volume mounted at `backend/uploads` (or move storage to a
-> bucket/DB) — not required for the demo.
+Use Node 22 or newer:
 
-## 2. Frontend → Vercel
-
-1. Vercel → **Add New → Project** → import this GitHub repo.
-2. **Root Directory:** `frontend` (Framework preset auto-detects **Vite**;
-   build `npm run build`, output `dist` — also pinned in `vercel.json`).
-3. **Environment Variables** → add:
-   - `VITE_API_URL` = your Railway URL from step 1 (no trailing slash, no `/api`),
-     e.g. `https://tender-dashboard-backend.up.railway.app`
-4. Deploy. The SPA rewrite in `vercel.json` handles deep links.
-5. If you set `CORS_ORIGIN` on Railway, make sure it matches the final Vercel
-   domain, then redeploy the backend.
-
----
-
-## Local development
-
-```bash
-# terminal 1 — backend (http://localhost:5000)
-cd backend && npm install && npm run dev
-
-# terminal 2 — frontend (http://localhost:5173)
-cd frontend && npm install && npm run dev
+```sh
+npm ci --prefix backend
+npm ci --prefix frontend
+npm run build
+npm test
 ```
 
-The frontend defaults to `http://localhost:5000` when `VITE_API_URL` is unset,
-so no local env file is needed. To point local dev at a remote API, create
-`frontend/.env.local` with `VITE_API_URL=…` (see `frontend/.env.example`).
-
-## Git setup
-
-This project is not yet a git repo. To deploy via GitHub:
-
-```bash
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin https://github.com/<you>/<repo>.git
-git push -u origin main
-```
-
-`node_modules/`, `dist/`, and `backend/uploads/` are git-ignored.
+Set backend environment variables in your shell. Run `npm run migrate`, then `npm start` from the repository root to serve the built application on `http://localhost:5000`. For frontend development, run `npm run dev` in `frontend/`; its Vite proxy forwards `/api` to port 5000.

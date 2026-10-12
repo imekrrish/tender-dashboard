@@ -1,0 +1,12 @@
+{
+  "name": "taiyangnews-procurement-radar",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "start": "npm --prefix backend start",
+    "migrate": "npm --prefix backend run migrate",
+    "build": "npm --prefix frontend run build",
+    "test": "npm --prefix backend test"
+  },
+  "engines": { "node": ">=22" }
+}

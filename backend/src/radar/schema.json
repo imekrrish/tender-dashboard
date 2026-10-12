@@ -1,0 +1,731 @@
+{
+  "master_regions": {
+    "region_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": true
+    },
+    "code": {
+      "type": "VARCHAR(50)",
+      "required": true,
+      "generated": false
+    },
+    "name": {
+      "type": "VARCHAR(100)",
+      "required": true,
+      "generated": false
+    },
+    "created_at": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": true
+    }
+  },
+  "master_countries": {
+    "country_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": true
+    },
+    "region_id": {
+      "type": "UUID",
+      "required": true,
+      "generated": false
+    },
+    "iso_code": {
+      "type": "VARCHAR(10)",
+      "required": true,
+      "generated": false
+    },
+    "name": {
+      "type": "VARCHAR(100)",
+      "required": true,
+      "generated": false
+    },
+    "created_at": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": true
+    }
+  },
+  "master_product_segments": {
+    "product_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": true
+    },
+    "code": {
+      "type": "VARCHAR(50)",
+      "required": true,
+      "generated": false
+    },
+    "name": {
+      "type": "VARCHAR(100)",
+      "required": true,
+      "generated": false
+    },
+    "description": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "is_active": {
+      "type": "BOOLEAN",
+      "required": false,
+      "generated": false
+    },
+    "created_at": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": true
+    }
+  },
+  "master_contract_scopes": {
+    "scope_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": true
+    },
+    "code": {
+      "type": "VARCHAR(50)",
+      "required": true,
+      "generated": false
+    },
+    "name": {
+      "type": "VARCHAR(100)",
+      "required": true,
+      "generated": false
+    },
+    "description": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "is_active": {
+      "type": "BOOLEAN",
+      "required": false,
+      "generated": false
+    },
+    "created_at": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": true
+    }
+  },
+  "tendering_authorities": {
+    "authority_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": true
+    },
+    "code": {
+      "type": "VARCHAR(50)",
+      "required": true,
+      "generated": false
+    },
+    "name": {
+      "type": "VARCHAR(255)",
+      "required": true,
+      "generated": false
+    },
+    "country_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": false
+    },
+    "portal_url": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "created_at": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": true
+    }
+  },
+  "tenders": {
+    "id": {
+      "type": "UUID",
+      "required": false,
+      "generated": true
+    },
+    "serial_no": {
+      "type": "BIGSERIAL",
+      "required": false,
+      "generated": true
+    },
+    "tender_id": {
+      "type": "VARCHAR(100)",
+      "required": true,
+      "generated": false
+    },
+    "ref_number": {
+      "type": "VARCHAR(150)",
+      "required": false,
+      "generated": false
+    },
+    "title": {
+      "type": "VARCHAR(500)",
+      "required": true,
+      "generated": false
+    },
+    "authority_id": {
+      "type": "UUID",
+      "required": true,
+      "generated": false
+    },
+    "scope_id": {
+      "type": "UUID",
+      "required": true,
+      "generated": false
+    },
+    "product_id": {
+      "type": "UUID",
+      "required": true,
+      "generated": false
+    },
+    "country_id": {
+      "type": "UUID",
+      "required": true,
+      "generated": false
+    },
+    "state": {
+      "type": "VARCHAR(100)",
+      "required": true,
+      "generated": false
+    },
+    "site_location": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "current_status": {
+      "type": "tender_status_enum",
+      "required": false,
+      "generated": false
+    },
+    "tender_type": {
+      "type": "VARCHAR(50)",
+      "required": false,
+      "generated": false
+    },
+    "tender_open_date": {
+      "type": "DATE",
+      "required": true,
+      "generated": false
+    },
+    "tender_close_date": {
+      "type": "TIMESTAMPTZ",
+      "required": true,
+      "generated": false
+    },
+    "pre_bid_meeting_date": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": false
+    },
+    "query_deadline": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": false
+    },
+    "bid_opening_date": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": false
+    },
+    "total_capacity_mw": {
+      "type": "NUMERIC(10, 2)",
+      "required": true,
+      "generated": false
+    },
+    "dc_capacity_mwp": {
+      "type": "NUMERIC(10, 2)",
+      "required": false,
+      "generated": false
+    },
+    "pv_type": {
+      "type": "VARCHAR(100)",
+      "required": true,
+      "generated": false
+    },
+    "module_tech": {
+      "type": "VARCHAR(100)",
+      "required": false,
+      "generated": false
+    },
+    "module_eff_pct": {
+      "type": "NUMERIC(5, 2)",
+      "required": false,
+      "generated": false
+    },
+    "mounting_tech": {
+      "type": "mounting_tech_enum",
+      "required": false,
+      "generated": false
+    },
+    "storage_tech": {
+      "type": "VARCHAR(100)",
+      "required": false,
+      "generated": false
+    },
+    "storage_capacity_mw": {
+      "type": "NUMERIC(10, 2)",
+      "required": false,
+      "generated": false
+    },
+    "storage_capacity_mwh": {
+      "type": "NUMERIC(10, 2)",
+      "required": false,
+      "generated": false
+    },
+    "storage_duration_hours": {
+      "type": "NUMERIC(4, 2)",
+      "required": false,
+      "generated": false
+    },
+    "round_trip_efficiency_rte_pct": {
+      "type": "NUMERIC(5, 2)",
+      "required": false,
+      "generated": false
+    },
+    "water_body_type": {
+      "type": "VARCHAR(100)",
+      "required": false,
+      "generated": false
+    },
+    "water_depth_variation_m": {
+      "type": "NUMERIC(6, 2)",
+      "required": false,
+      "generated": false
+    },
+    "floater_tech": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "interconnection": {
+      "type": "VARCHAR(100)",
+      "required": false,
+      "generated": false
+    },
+    "substation_voltage_kv": {
+      "type": "NUMERIC(6, 2)",
+      "required": false,
+      "generated": false
+    },
+    "almm_compliance_required": {
+      "type": "BOOLEAN",
+      "required": false,
+      "generated": false
+    },
+    "dcr_mandatory": {
+      "type": "BOOLEAN",
+      "required": false,
+      "generated": false
+    },
+    "link_to_tender": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "tender_details_1": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "tender_details_2": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "remarks": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "database_entry_date": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": true
+    },
+    "last_edited_date": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": true
+    },
+    "last_edited_by": {
+      "type": "VARCHAR(100)",
+      "required": false,
+      "generated": true
+    }
+  },
+  "tender_eligibility": {
+    "tender_id": {
+      "type": "UUID",
+      "required": true,
+      "generated": false
+    },
+    "emd_currency": {
+      "type": "VARCHAR(10)",
+      "required": false,
+      "generated": false
+    },
+    "emd_amount": {
+      "type": "NUMERIC(15, 2)",
+      "required": false,
+      "generated": false
+    },
+    "emd_mode": {
+      "type": "VARCHAR(150)",
+      "required": false,
+      "generated": false
+    },
+    "desired_turnover": {
+      "type": "NUMERIC(15, 2)",
+      "required": false,
+      "generated": false
+    },
+    "net_worth_requirement": {
+      "type": "NUMERIC(15, 2)",
+      "required": false,
+      "generated": false
+    },
+    "working_capital_requirement": {
+      "type": "NUMERIC(15, 2)",
+      "required": false,
+      "generated": false
+    },
+    "estimated_project_value": {
+      "type": "NUMERIC(15, 2)",
+      "required": false,
+      "generated": false
+    },
+    "performance_bg_pct": {
+      "type": "NUMERIC(5, 2)",
+      "required": false,
+      "generated": false
+    },
+    "tender_document_fee": {
+      "type": "NUMERIC(10, 2)",
+      "required": false,
+      "generated": false
+    },
+    "manufacturer": {
+      "type": "VARCHAR(255)",
+      "required": false,
+      "generated": false
+    },
+    "min_manf_capacity_mw": {
+      "type": "NUMERIC(10, 2)",
+      "required": false,
+      "generated": false
+    },
+    "certifications": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "min_installed_capacity_mw": {
+      "type": "NUMERIC(10, 2)",
+      "required": false,
+      "generated": false
+    },
+    "ld_clause": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "ld_cap_pct": {
+      "type": "NUMERIC(5, 2)",
+      "required": false,
+      "generated": false
+    },
+    "no_of_partners_allowed": {
+      "type": "INT",
+      "required": false,
+      "generated": false
+    }
+  },
+  "tender_documents": {
+    "doc_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": true
+    },
+    "tender_id": {
+      "type": "UUID",
+      "required": true,
+      "generated": false
+    },
+    "document_title": {
+      "type": "VARCHAR(255)",
+      "required": true,
+      "generated": false
+    },
+    "doc_type": {
+      "type": "VARCHAR(50)",
+      "required": false,
+      "generated": false
+    },
+    "document_bucket_url": {
+      "type": "TEXT",
+      "required": true,
+      "generated": false
+    },
+    "file_size_mb": {
+      "type": "NUMERIC(6, 2)",
+      "required": false,
+      "generated": false
+    },
+    "uploaded_at": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": true
+    }
+  },
+  "tender_corrigenda": {
+    "corrigendum_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": true
+    },
+    "tender_id": {
+      "type": "UUID",
+      "required": true,
+      "generated": false
+    },
+    "corrigendum_no": {
+      "type": "INT",
+      "required": true,
+      "generated": false
+    },
+    "issue_date": {
+      "type": "DATE",
+      "required": true,
+      "generated": false
+    },
+    "old_close_date": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": false
+    },
+    "new_close_date": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": false
+    },
+    "summary_of_changes": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "document_url": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "created_at": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": true
+    }
+  },
+  "market_players": {
+    "player_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": true
+    },
+    "name": {
+      "type": "VARCHAR(255)",
+      "required": true,
+      "generated": false
+    },
+    "company_type": {
+      "type": "VARCHAR(50)",
+      "required": true,
+      "generated": false
+    },
+    "headquarters_country_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": false
+    },
+    "website": {
+      "type": "TEXT",
+      "required": false,
+      "generated": false
+    },
+    "created_at": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": true
+    }
+  },
+  "tender_auction_meta": {
+    "auction_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": true
+    },
+    "tender_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": false
+    },
+    "auction_completed_date": {
+      "type": "DATE",
+      "required": true,
+      "generated": false
+    },
+    "total_capacity_auctioned_mw": {
+      "type": "NUMERIC(10, 2)",
+      "required": true,
+      "generated": false
+    },
+    "total_bids_received_mw": {
+      "type": "NUMERIC(10, 2)",
+      "required": false,
+      "generated": false
+    },
+    "oversubscription_ratio": {
+      "type": "NUMERIC(5, 2)",
+      "required": false,
+      "generated": false
+    },
+    "tariff_ceiling_rate": {
+      "type": "NUMERIC(8, 4)",
+      "required": false,
+      "generated": false
+    },
+    "min_winning_tariff": {
+      "type": "NUMERIC(8, 4)",
+      "required": true,
+      "generated": false
+    },
+    "max_winning_tariff": {
+      "type": "NUMERIC(8, 4)",
+      "required": false,
+      "generated": false
+    },
+    "average_weighted_tariff": {
+      "type": "NUMERIC(8, 4)",
+      "required": false,
+      "generated": false
+    },
+    "tariff_currency": {
+      "type": "VARCHAR(10)",
+      "required": false,
+      "generated": false
+    },
+    "tariff_unit": {
+      "type": "VARCHAR(20)",
+      "required": false,
+      "generated": false
+    },
+    "created_at": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": true
+    }
+  },
+  "tender_bid_results": {
+    "result_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": true
+    },
+    "tender_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": false
+    },
+    "bidder_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": false
+    },
+    "bid_rank": {
+      "type": "VARCHAR(10)",
+      "required": false,
+      "generated": false
+    },
+    "is_winner": {
+      "type": "BOOLEAN",
+      "required": false,
+      "generated": false
+    },
+    "quoted_capacity_mw": {
+      "type": "NUMERIC(10, 2)",
+      "required": true,
+      "generated": false
+    },
+    "allocated_capacity_mw": {
+      "type": "NUMERIC(10, 2)",
+      "required": true,
+      "generated": false
+    },
+    "allocated_storage_mwh": {
+      "type": "NUMERIC(10, 2)",
+      "required": false,
+      "generated": false
+    },
+    "quoted_tariff": {
+      "type": "NUMERIC(8, 4)",
+      "required": true,
+      "generated": false
+    },
+    "winning_tariff": {
+      "type": "NUMERIC(8, 4)",
+      "required": true,
+      "generated": false
+    },
+    "tariff_currency": {
+      "type": "VARCHAR(10)",
+      "required": false,
+      "generated": false
+    },
+    "epc_contractor_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": false
+    },
+    "module_supplier_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": false
+    },
+    "floater_supplier_id": {
+      "type": "UUID",
+      "required": false,
+      "generated": false
+    },
+    "ppa_signed": {
+      "type": "BOOLEAN",
+      "required": false,
+      "generated": false
+    },
+    "ppa_signing_date": {
+      "type": "DATE",
+      "required": false,
+      "generated": false
+    },
+    "scheduled_cod_date": {
+      "type": "DATE",
+      "required": false,
+      "generated": false
+    },
+    "project_status": {
+      "type": "VARCHAR(50)",
+      "required": false,
+      "generated": false
+    },
+    "created_at": {
+      "type": "TIMESTAMPTZ",
+      "required": false,
+      "generated": true
+    }
+  }
+}
