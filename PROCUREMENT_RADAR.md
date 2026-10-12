@@ -44,3 +44,7 @@ The root `railway.json` runs `npm run migrate` before deployment and checks `/ap
 ## Verification
 
 `npm test` in `backend` tests validation, parameter binding, CSV formula escaping, schema relations and HTTP catalog CRUD/authentication using pg-mem. `npm run build` in `frontend` type-checks and builds the app. These checks do not replace testing against the provided production PostgreSQL or browser layout verification.
+
+## Shared UI
+
+The tender page uses the same DashboardLayout, Header and KpiCard components as Price Index. Tender-specific labels, KPI descriptions, advisory text, table headings and the six eligibility drawer fields follow the supplied HTML. Header upload controls are omitted for tenders; Price Index retains its default upload/refresh behavior.

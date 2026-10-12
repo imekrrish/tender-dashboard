@@ -5,24 +5,32 @@ import type { ModuleId } from './ModuleSwitcher';
 import { RefreshCw, Sun } from 'lucide-react';
 
 interface HeaderProps {
-  onUpload: (file: File) => void;
-  isUploading: boolean;
-  uploadedFileName: string;
+  onUpload?: (file: File) => void;
+  isUploading?: boolean;
+  uploadedFileName?: string;
   onRefresh: () => void;
   isRefreshing?: boolean;
   /** Line under the product name — each module names what it is showing. */
   subtitle?: string;
+  title?: string;
+  navigation?: React.ReactNode;
+  actions?: React.ReactNode;
+  showRefresh?: boolean;
   activeModule: ModuleId;
   onModuleChange: (id: ModuleId) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onUpload,
-  isUploading,
-  uploadedFileName,
+  isUploading = false,
+  uploadedFileName = '',
   onRefresh,
   isRefreshing = false,
   subtitle = 'Solar tender & auction intelligence',
+  title = 'Market Navigator',
+  navigation,
+  actions,
+  showRefresh = true,
   activeModule,
   onModuleChange,
 }) => {
@@ -35,7 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
         <div className="leading-tight">
           <h1 className="font-display text-[17px] font-semibold text-slate-900 tracking-tight">
-            Market Navigator
+            {title}
           </h1>
           <p className="hidden sm:block text-2xs text-slate-500 font-medium mt-0.5">{subtitle}</p>
         </div>
@@ -43,25 +51,26 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Module navigation */}
       <div className="order-3 w-full lg:order-2 lg:w-auto">
-        <ModuleSwitcher active={activeModule} onChange={onModuleChange} />
+        {navigation ?? <ModuleSwitcher active={activeModule} onChange={onModuleChange} />}
       </div>
 
       {/* Actions */}
       <div className="order-2 lg:order-3 flex items-center gap-2.5">
-        <ExcelUploadButton
+        {actions}
+        {onUpload && <ExcelUploadButton
           onUpload={onUpload}
           isUploading={isUploading}
           uploadedFileName={uploadedFileName}
-        />
+        />}
 
-        <button
+        {showRefresh && <button
           onClick={onRefresh}
           disabled={isRefreshing || isUploading}
           className="grid place-items-center w-9 h-9 rounded-lg bg-white ring-1 ring-line-strong hover:bg-slate-50 text-slate-500 hover:text-slate-800 disabled:opacity-50 cursor-pointer transition"
           title="Refresh data source"
         >
           <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-        </button>
+        </button>}
       </div>
     </header>
   );
