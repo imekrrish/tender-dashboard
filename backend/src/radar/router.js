@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { timingSafeEqual } from 'node:crypto';
+import { createAdminAuth } from './admin-auth.js';
 import { pool, database } from '../db/pool.js';
 import { schema, statuses, validate, uuid, invalid, filterSql, csvCell } from './validation.js';
 export const resources = {
@@ -11,14 +11,7 @@ export const resources = {
 };
 const router = Router();
 const run = fn => (req,res,next) => Promise.resolve(fn(req,res)).catch(next);
-export function admin(req,res,next) {
-  const key = process.env.ADMIN_API_KEY;
-  if (!key) return res.status(503).json({error:'Admin access is not configured'});
-  const supplied = req.headers.authorization?.replace(/^Bearer /,'') || '';
-  const a = Buffer.from(key), b = Buffer.from(supplied);
-  if (a.length !== b.length || !timingSafeEqual(a,b)) return res.status(401).json({error:'Admin authentication required'});
-  next();
-}
+export const admin = createAdminAuth();
 router.use(database);
 router.get('/health',run(async (req,res) => {
   await pool.query('SELECT 1 FROM tenders LIMIT 1');

@@ -5,7 +5,7 @@ Set these on the single **application service**:
 | Variable | Value | Required |
 |---|---|---|
 | `DATABASE_URL` | Your PostgreSQL connection URL, or `${{Postgres.DATABASE_URL}}` when the database service is named `Postgres` | Yes |
-| `ADMIN_API_KEY` | A unique long random secret; generate with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` | Yes, to use admin CRUD |
+| `ADMIN_API_KEY` | Your privately configured 4-digit admin PIN | Yes, to use admin CRUD |
 | `NODE_ENV` | `production` | Set explicitly; also the Docker default |
 
 Railway supplies `PORT`; do not set it manually. Do not set `VITE_API_URL` or `CORS_ORIGIN` for the combined service. Frontend requests use same-origin `/api`, so there are no frontend environment variables to configure. Remove any old `VITE_API_URL` values and stale build/start/root-directory overrides from the application service.
