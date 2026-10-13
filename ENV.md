@@ -6,6 +6,7 @@ Set these on the single **application service**:
 |---|---|---|
 | `DATABASE_URL` | Your PostgreSQL connection URL, or `${{Postgres.DATABASE_URL}}` when the database service is named `Postgres` | Yes |
 | `ADMIN_API_KEY` | Your privately configured 4-digit admin PIN | Yes, to use admin CRUD |
+| `TENDER_SEED_BASE64` | Private gzip/base64 seed bundle supplied separately; paste the entire value | For automatic seed |
 | `NODE_ENV` | `production` | Set explicitly; also the Docker default |
 
 Railway supplies `PORT`; do not set it manually. Do not set `VITE_API_URL` or `CORS_ORIGIN` for the combined service. Frontend requests use same-origin `/api`, so there are no frontend environment variables to configure. Remove any old `VITE_API_URL` values and stale build/start/root-directory overrides from the application service.
@@ -13,3 +14,5 @@ Railway supplies `PORT`; do not set it manually. Do not set `VITE_API_URL` or `C
 `CORS_ORIGIN` remains optional for a deliberately separate client, not this deployment. `ADMIN_API_KEY` is entered in the site's admin screen; it is never compiled into the frontend.
 
 If using an external database, use its provider-approved PostgreSQL URL including required SSL options. The application does not disable certificate validation. No other database credentials or pool variables are required.
+
+On each deployment `npm run deploy:prepare` applies migrations, then the configured seed. The seed runs once per database using the import ledger; repeat deployments skip the same bundle without overwriting edits. Remove the seed variable later if no longer needed. Never put its value or the DB URL in GitHub.

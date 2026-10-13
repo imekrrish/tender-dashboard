@@ -8,7 +8,7 @@ npm run import:tenders -- --file /private/path/tenders-import.json --dry-run
 npm run import:tenders -- --file /private/path/tenders-import.json --apply
 ```
 
-Dry-run is the default. An explicit apply runs the full batch in a transaction and records its content hash. An exact repeat is skipped. Changed contents under an existing import key or conflicting existing IDs fail without overwriting existing records. Do not add this one-time operation to the recurring Railway pre-deploy command. Keep the bundle in a private environment when importing it.
+Dry-run is the default. An explicit apply runs the full batch in a transaction and records its content hash. An exact repeat is skipped. Changed contents under an existing import key or conflicting existing IDs fail without overwriting existing records. For automatic deployment seeding, configure the private `TENDER_SEED_BASE64` variable; the deployment preparation script runs the same idempotent importer after migrations. Keep the bundle in a private environment when importing it.
 
 Migration 002 retains site location, coordinates, tags and source context. Full eligibility conditions and non-percentage commercial terms have separate text fields. Source records preserve both representations for review; workbook SQL is never executed against PostgreSQL. The source sheets are supplied samples and are labeled accordingly in the dashboard. Document URLs and tender facts still need official verification.
 
