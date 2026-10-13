@@ -7,10 +7,10 @@ Frontend and backend deploy together from the repository root. PostgreSQL can be
 3. Set **Root Directory** to `/` (repository root), not `backend` or `frontend`.
 4. Use **Config File Path** `/railway.json`. Clear old dashboard build/start/pre-deploy overrides. The repository config selects:
    - Builder: Dockerfile (`Dockerfile` at repository root).
-   - Pre-deploy: `npm run migrate`.
+   - Pre-deploy: `npm run deploy:prepare` (migrate, then seed).
    - Start: `npm start`.
    - Health check: `/api/radar/health`.
-5. Add variables from `ENV.md`: `DATABASE_URL`, `ADMIN_API_KEY`, `NODE_ENV=production`. Railway injects `PORT`; the server listens on `0.0.0.0` at that port.
+5. Add variables from `ENV.md`: `DATABASE_URL`, `ADMIN_API_KEY`, `NODE_ENV=production`, and `TENDER_SEED_BASE64` for automatic data loading.. Railway injects `PORT`; the server listens on `0.0.0.0` at that port.
 6. Deploy, then **Networking → Generate Domain**. Let Railway use the application's `PORT` as the target port.
 7. Open `/` for the dashboard and `/api/radar/health` for the database check. Successful readiness returns `{"status":"OK","source":"PostgreSQL"}`.
 
@@ -32,3 +32,7 @@ npm test
 ```
 
 Set backend environment variables in your shell. Run `npm run migrate`, then `npm start` from the repository root to serve the built application on `http://localhost:5000`. For frontend development, run `npm run dev` in `frontend/`; its Vite proxy forwards `/api` to port 5000.
+
+## Automatic seed
+
+Set `TENDER_SEED_BASE64` to the privately provided gzip/base64 JSON bundle. The pre-deploy script seeds after migrations and before the app starts. First import inserts the batch atomically; exact repeats skip it. A failure stops deployment and leaves the import transaction rolled back. Conflicting pre-existing records require reconciliation rather than being silently overwritten. If the seed variable is absent, migrations still run and seeding is skipped.

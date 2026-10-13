@@ -7,7 +7,9 @@
     "migrate": "npm --prefix backend run migrate",
     "build": "npm --prefix frontend run build",
     "test": "npm --prefix backend test",
-    "import:tenders": "npm --prefix backend run import:tenders --"
+    "import:tenders": "npm --prefix backend run import:tenders --",
+    "seed": "npm --prefix backend run seed",
+    "deploy:prepare": "npm run migrate && npm run seed"
   },
   "engines": {
     "node": ">=22"
