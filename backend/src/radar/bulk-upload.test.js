@@ -7,7 +7,7 @@ const catalogs=Object.fromEntries(Object.entries(catalogFields).map(([key,[,pk,c
 const tender={tender_id:'BULK001',title:'Solar',country_id:'CODE',product_id:'CODE',scope_id:'CODE',authority_id:'CODE',state:'Telangana',tender_open_date:'2099-01-01',tender_close_date:'2099-02-01T00:00:00Z',total_capacity_mw:100,pv_type:'Solar'};
 function workbook(rows) {const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),'Tenders');return XLSX.write(wb,{type:'buffer',bookType:'xlsx'});}
 test('Excel template round-trips codes, native dates and numeric capacities',()=> {
- const template=XLSX.read(templateWorkbook(catalogs));assert.ok(template.Sheets.Tenders);assert.ok(template.Sheets.country_id);
+ const template=XLSX.read(templateWorkbook(catalogs));assert.deepEqual(template.SheetNames.slice(-2),['DB_Samples_SQL','DB_Samples_rows']);assert.ok(template.Sheets.country_id);
  const rows=parseWorkbook(workbook([{...tender,tender_open_date:new Date('2099-01-01T00:00:00Z'),total_capacity_mw:'1,000'}]),catalogs);
  assert.equal(rows[0].country_id,id);assert.equal(rows[0].tender_open_date,'2099-01-01');assert.equal(rows[0].total_capacity_mw,1000);
 });

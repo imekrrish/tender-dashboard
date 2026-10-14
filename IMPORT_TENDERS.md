@@ -17,8 +17,8 @@ The prepared data is provided privately. The production DB connection is still r
 ## Excel bulk upload in the browser
 
 Open **Master Tables (CRUD)**, sign in with the admin PIN, and select **Tenders**.
-Download the Excel template, fill its **Tenders** sheet, then select **Upload Excel**.
-Reference sheets list existing country, product, scope and authority codes. Create missing
+Download the Excel template, fill its **DB_Samples_rows** tab, then select **Upload Excel**.
+Reference sheets list existing country, product, scope and authority names and codes. Create missing
 catalog entries first, then download a fresh template. Required columns are listed on the
 Instructions sheet. Use real Excel dates or ISO dates; include a timezone for timestamps.
 
@@ -26,12 +26,16 @@ Uploads accept `.xlsx` / `.xls`, up to 5 MB and 1,000 tenders. Validation errors
 Excel row numbers. Every row is validated before writing, and all inserts share a transaction:
 a failed row or duplicate tender ID cancels the entire batch. Existing tenders are never overwritten.
 
-Public status, admin listings, filters, KPIs and CSV export automatically show
-**Under Evaluation** for Open / Under Pre-Bid tenders after `tender_close_date` has passed.
-Comparison uses the full timestamp and respects its timezone. Draft records remain hidden;
-Awarded, Cancelled and other manually maintained workflow statuses remain unchanged.
-Closing-date edits immediately change the calculated status. The visible dashboard refreshes
-every minute and when the tab gains focus. No scheduled job or new migration is required.
+Public status, admin listings, filters, KPIs, details and CSV export use the date rules:
+- **Upcoming**: opening date is after today and closing timestamp has not passed.
+- **Open (Active)**: opening date is today or earlier and closing timestamp has not passed.
+- **Archived**: closing timestamp is in the past, regardless of opening date.
+
+Opening dates use PostgreSQL's calendar day/session timezone. Closing comparisons use the
+full timestamp and respect its timezone. Draft records remain hidden. Stored workflow
+statuses remain in the database for compatibility; public labels are calculated automatically.
+Status is not manually editable in the tender form. Date edits immediately affect the label.
+The visible dashboard refreshes every minute and on focus. No migration is required.
 
 Price Index is temporarily hidden, including previously remembered module selections.
 Tender document links appear under **Tender Details and Documents (Official Portal)**.
@@ -39,3 +43,25 @@ Tender document links appear under **Tender Details and Documents (Official Port
 Endpoints (admin authentication required):
 - `GET /api/radar/admin/tenders/template.xlsx`
 - `POST /api/radar/admin/tenders/upload` with multipart field `file`
+
+## Original workbook format
+
+The download's final two tabs are **DB_Samples_SQL** and **DB_Samples_rows**,
+matching the supplied workbook. DB_Samples_rows retains the four original section
+titles and every original column heading, in the same order: Tenders_Master,
+Eligibility, Documents, Auction_BI. Blank input rows occupy the sample row positions;
+insert additional rows above the next section heading as needed.
+
+Upload the complete workbook or the downloaded template. The importer selects
+DB_Samples_rows regardless of other tabs, and links all sections by Tender ID.
+Names and codes resolve against existing country/product/scope/authority catalogs.
+Create missing catalog records first. Winning developers and EPC contractors use
+existing matching market players or are created in the same import transaction.
+
+Tender, eligibility, document, auction and winning-bid records are saved together.
+SQL sheet contents are reference only and are never executed. Original source fields,
+including document format, portal link and audit columns, are retained as source context.
+Optional N/A numeric cells stay empty; text commercial terms remain text. Native Excel
+percentages convert to percentage points, e.g. 5% becomes 5 in percentage columns.
+Excel timestamps are treated as UTC; use ISO timestamps with an explicit offset for
+local cutoffs. The earlier flat Tenders upload format remains accepted for compatibility.

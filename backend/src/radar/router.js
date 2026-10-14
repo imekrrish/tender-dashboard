@@ -3,7 +3,7 @@ import { catalogFields, parseWorkbook, insertTenders, templateWorkbook } from '.
 import { Router } from 'express';
 import { createAdminAuth } from './admin-auth.js';
 import { pool, database } from '../db/pool.js';
-import { schema, statuses, statusSql, validate, uuid, invalid, filterSql, csvCell } from './validation.js';
+import { schema, statuses, publicStatuses, statusSql, validate, uuid, invalid, filterSql, csvCell } from './validation.js';
 export const resources = {
   regions: ['master_regions','region_id'], countries: ['master_countries','country_id'],
   products: ['master_product_segments','product_id'], scopes: ['master_contract_scopes','scope_id'],
@@ -21,7 +21,7 @@ router.get('/health',run(async (req,res) => {
 }));
 router.get('/catalogs',run(async (req,res) => {
   const entries = await Promise.all(Object.entries(resources).slice(0,5).map(async ([key,[table]]) => [key,(await pool.query(`SELECT * FROM ${table} ORDER BY name`)).rows]));
-  res.json({ ...Object.fromEntries(entries), statuses });
+  res.json({ ...Object.fromEntries(entries), statuses:publicStatuses });
 }));
 const joins = `FROM tenders t JOIN master_countries c ON c.country_id=t.country_id
  JOIN master_regions r ON r.region_id=c.region_id
@@ -66,7 +66,8 @@ router.get('/tenders/:id',run(async (req,res) => {
 router.use('/admin',admin);
 const upload = multer({storage:multer.memoryStorage(), limits:{fileSize:5*1024*1024,files:1}});
 async function uploadCatalogs() {
-  return Object.fromEntries(await Promise.all(Object.entries(catalogFields).map(async ([key,[table]]) => [key,(await pool.query(`SELECT * FROM ${table}`)).rows])));
+  const entries=await Promise.all(Object.entries(catalogFields).map(async ([key,[table]]) => [key,(await pool.query(`SELECT * FROM ${table}`)).rows]));
+  return {...Object.fromEntries(entries),players:(await pool.query('SELECT * FROM market_players')).rows};
 }
 router.get('/admin/tenders/template.xlsx',run(async(req,res)=> {
   res.setHeader('Content-Disposition','attachment; filename="tenders-template.xlsx"');

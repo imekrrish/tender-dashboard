@@ -1,6 +1,7 @@
 import schema from './schema.json' with { type: 'json' };
 export { schema };
-export const statusSql = "CASE WHEN t.current_status IN ('Open','Under Pre-Bid') AND t.tender_close_date < now() THEN 'Under Evaluation' ELSE t.current_status::text END";
+export const statusSql = "CASE WHEN t.current_status = 'Draft' THEN 'Draft' WHEN t.tender_close_date < now() THEN 'Archived' WHEN t.tender_open_date > CURRENT_DATE THEN 'Upcoming' ELSE 'Open' END";
+export const publicStatuses = ['Open','Upcoming','Archived'];
 export const statuses = ['Draft','Open','Under Pre-Bid','Under Evaluation','Financial Evaluation','Awarded','Retendered','Cancelled'];
 const mounting = ['Fixed Tilt','Single-Axis Tracker','Dual-Axis Tracker','Pure Floater (HDPE)','Elevated Agri Structure','Ballasted Rooftop','Containerized BESS','N/A'];
 export function invalid(message) { const e = new Error(message); e.status = 400; throw e; }
@@ -35,7 +36,7 @@ export function filterSql(filters = {}) {
   const values = [], clauses = ['t.current_status <> \'Draft\''];
   const add = (sql, value) => { values.push(value); clauses.push(sql.replace('?', `$${values.length}`)); };
   const status = filters.status || 'Open';
-  if (status !== 'All') { if (!statuses.includes(status)) invalid('Invalid status filter'); add(`${statusSql} = ?`,status); }
+  if (status !== 'All') { if (!publicStatuses.includes(status)) invalid('Invalid status filter'); add(`${statusSql} = ?`,status); }
   for (const [key,col] of Object.entries({product_id:'t.product_id',scope_id:'t.scope_id',country_id:'t.country_id',authority_id:'t.authority_id',region_id:'c.region_id'})) if (filters[key]) add(`${col} = ?`,uuid(filters[key]));
   if (filters.product_ids) {
     if (typeof filters.product_ids !== 'string' || filters.product_ids.length > 4000) invalid('Invalid product selection');
