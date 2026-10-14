@@ -1,28 +1,7 @@
-import React, { useState } from 'react';
 import { ProcurementRadar } from './pages/ProcurementRadar';
-import { PriceIndex } from './pages/PriceIndex';
-import type { ModuleId } from './components/layout/ModuleSwitcher';
 import './App.css';
 
-const STORAGE_KEY = 'activeModule';
-
-const App: React.FC = () => {
-  // The terminal will grow to four modules; the switcher remembers where you were.
-  const [activeModule, setActiveModule] = useState<ModuleId>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    return saved === 'priceIndex' ? 'priceIndex' : 'tenders';
-  });
-
-  const handleModuleChange = (id: ModuleId) => {
-    setActiveModule(id);
-    localStorage.setItem(STORAGE_KEY, id);
-  };
-
-  if (activeModule === 'priceIndex') {
-    return <PriceIndex activeModule={activeModule} onModuleChange={handleModuleChange} />;
-  }
-
-  return <ProcurementRadar onPrices={() => handleModuleChange('priceIndex')} />;
-};
-
-export default App;
+// Price Index is temporarily hidden while its weekly source data is maintained.
+export default function App() {
+  return <ProcurementRadar />;
+}
