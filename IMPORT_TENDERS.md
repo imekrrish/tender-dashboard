@@ -26,12 +26,16 @@ Uploads accept `.xlsx` / `.xls`, up to 5 MB and 1,000 tenders. Validation errors
 Excel row numbers. Every row is validated before writing, and all inserts share a transaction:
 a failed row or duplicate tender ID cancels the entire batch. Existing tenders are never overwritten.
 
-Public status, admin listings, filters, KPIs and CSV export automatically show
-**Under Evaluation** for Open / Under Pre-Bid tenders after `tender_close_date` has passed.
-Comparison uses the full timestamp and respects its timezone. Draft records remain hidden;
-Awarded, Cancelled and other manually maintained workflow statuses remain unchanged.
-Closing-date edits immediately change the calculated status. The visible dashboard refreshes
-every minute and when the tab gains focus. No scheduled job or new migration is required.
+Public status, admin listings, filters, KPIs, details and CSV export use the date rules:
+- **Upcoming**: opening date is after today and closing timestamp has not passed.
+- **Open (Active)**: opening date is today or earlier and closing timestamp has not passed.
+- **Archived**: closing timestamp is in the past, regardless of opening date.
+
+Opening dates use PostgreSQL's calendar day/session timezone. Closing comparisons use the
+full timestamp and respect its timezone. Draft records remain hidden. Stored workflow
+statuses remain in the database for compatibility; public labels are calculated automatically.
+Status is not manually editable in the tender form. Date edits immediately affect the label.
+The visible dashboard refreshes every minute and on focus. No migration is required.
 
 Price Index is temporarily hidden, including previously remembered module selections.
 Tender document links appear under **Tender Details and Documents (Official Portal)**.

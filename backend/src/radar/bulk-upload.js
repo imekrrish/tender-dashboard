@@ -70,7 +70,7 @@ export function templateWorkbook(catalogs) {
     ['Required: '+uploadFields.filter(k=>schema.tenders[k].required).join(', ')],
     ['Use existing catalog codes from reference sheets for country_id, product_id, scope_id, authority_id.'],
     ['Dates: Excel dates or YYYY-MM-DD; timestamps may include a timezone, e.g. 2026-10-30T12:00:00Z.'],
-    ['Open and Under Pre-Bid tenders become Under Evaluation after their closing timestamp passes. Use timezone-qualified timestamps.'],
+    ['Future opening date = Upcoming; opening date today or earlier with closing timestamp not passed = Open; closing timestamp passed = Archived. Use timezone-qualified timestamps.'],
     ['Maximum 1,000 rows. Any invalid or duplicate record cancels the whole upload; existing tenders are never overwritten.'],
     ['Separate tags with semicolons. Boolean fields use true or false.']
   ]), 'Instructions');
