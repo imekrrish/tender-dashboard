@@ -1,7 +1,9 @@
+import multer from 'multer';
+import { catalogFields, parseWorkbook, insertTenders, templateWorkbook } from './bulk-upload.js';
 import { Router } from 'express';
 import { createAdminAuth } from './admin-auth.js';
 import { pool, database } from '../db/pool.js';
-import { schema, statuses, validate, uuid, invalid, filterSql, csvCell } from './validation.js';
+import { schema, statuses, statusSql, validate, uuid, invalid, filterSql, csvCell } from './validation.js';
 export const resources = {
   regions: ['master_regions','region_id'], countries: ['master_countries','country_id'],
   products: ['master_product_segments','product_id'], scopes: ['master_contract_scopes','scope_id'],
@@ -27,7 +29,8 @@ const joins = `FROM tenders t JOIN master_countries c ON c.country_id=t.country_
  JOIN master_contract_scopes s ON s.scope_id=t.scope_id
  JOIN tendering_authorities a ON a.authority_id=t.authority_id
  LEFT JOIN tender_eligibility e ON e.tender_id=t.id`;
-const columns = `t.*, c.name AS country, r.name AS region, p.name AS product, p.code AS product_code,
+const tenderColumns = Object.keys(schema.tenders).filter(k=>k!=='current_status').map(k=>`t.${k}`).join(',') + `, ${statusSql} AS current_status`;
+const columns = `${tenderColumns}, c.name AS country, r.name AS region, p.name AS product, p.code AS product_code,
  s.name AS scope, a.name AS authority, e.emd_currency,e.emd_amount,e.desired_turnover,
  e.min_installed_capacity_mw,e.technical_track_record_text,e.manufacturer,e.certifications,e.ld_clause`;
 router.get('/tenders',run(async (req,res) => {
@@ -41,7 +44,7 @@ router.get('/tenders',run(async (req,res) => {
     coalesce(sum(CASE WHEN p.code <> 'BESS' THEN t.total_capacity_mw ELSE 0 END),0) AS solar_mw,
     coalesce(sum(t.storage_capacity_mwh),0) AS storage_mwh,
     coalesce(sum(t.storage_capacity_mw),0) AS storage_mw,
-    count(*) FILTER (WHERE t.current_status IN ('Open','Under Pre-Bid') AND t.tender_close_date >= now() AND t.tender_close_date < now()+interval '14 days')::int AS expiring
+    count(*) FILTER (WHERE (${statusSql}) = 'Open' AND t.tender_close_date >= now() AND t.tender_close_date < now()+interval '14 days')::int AS expiring
     ${joins} WHERE ${where}`,values)
   ]);
   res.json({data:data.rows,summary:summary.rows[0],limit,offset});
@@ -61,11 +64,26 @@ router.get('/tenders/:id',run(async (req,res) => {
   res.json({...row.rows[0],documents:documents.rows,corrigenda:corrigenda.rows,eligibility:eligibility.rows[0] || null});
 }));
 router.use('/admin',admin);
+const upload = multer({storage:multer.memoryStorage(), limits:{fileSize:5*1024*1024,files:1}});
+async function uploadCatalogs() {
+  return Object.fromEntries(await Promise.all(Object.entries(catalogFields).map(async ([key,[table]]) => [key,(await pool.query(`SELECT * FROM ${table}`)).rows])));
+}
+router.get('/admin/tenders/template.xlsx',run(async(req,res)=> {
+  res.setHeader('Content-Disposition','attachment; filename="tenders-template.xlsx"');
+  res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(templateWorkbook(await uploadCatalogs()));
+}));
+router.post('/admin/tenders/upload',upload.single('file'),run(async(req,res)=> {
+  if (!req.file || !/\.xlsx?$/i.test(req.file.originalname)) invalid('Select an .xlsx or .xls workbook');
+  const rows = parseWorkbook(req.file.buffer,await uploadCatalogs());
+  const client = await pool.connect();
+  try { await insertTenders(client,rows); } finally { client.release(); }
+  res.status(201).json({imported:rows.length});
+}));
 router.get('/admin/schema',(req,res)=>res.json({resources,schema,statuses}));
 const resource = req => { const entry = resources[req.params.resource]; if (!entry) invalid('Unknown resource'); return entry; };
 router.get('/admin/:resource',run(async(req,res)=> {
   const [table] = resource(req);
-  res.json((await pool.query(`SELECT * FROM ${table} LIMIT 1000`)).rows);
+  res.json((await pool.query(`SELECT ${table === 'tenders' ? tenderColumns : '*'} FROM ${table} t LIMIT 1000`)).rows);
 }));
 router.post('/admin/:resource',run(async(req,res)=> {
   const [table] = resource(req), data = validate(table,req.body);
@@ -91,6 +109,8 @@ router.delete('/admin/:resource/:id',run(async(req,res)=> {
   res.status(204).end();
 }));
 router.use((err,req,res,next)=> {
+  if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({error:'Workbook must be 5 MB or smaller'});
+  if (err.name === 'MulterError') return res.status(400).json({error:'Upload exactly one workbook in the file field'});
   if (err.code === '23505') return res.status(409).json({error:'This identifier already exists'});
   if (err.code === '23503') return res.status(409).json({error:'Related record missing or entry is still in use'});
   if (['23502','23514','22P02','22007','22008','22003'].includes(err.code)) return res.status(400).json({error:'Invalid field value'});

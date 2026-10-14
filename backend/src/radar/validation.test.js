@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { validate, filterSql, csvCell } from './validation.js';
 test('filter defaults to Open and binds search without interpolating SQL',()=> {
  const f = filterSql({search:"'; DROP TABLE tenders; --"});
- assert.match(f.where,/current_status = \$1/);assert.equal(f.values[0],'Open');
+ assert.match(f.where,/END = \$1/);assert.equal(f.values[0],'Open');
  assert.equal(f.values[1],"%'; DROP TABLE tenders; --%");assert.ok(!f.where.includes('DROP'));
 });
 test('rejects unknown fields, invalid foreign IDs and protected audit writes',()=> {
