@@ -66,7 +66,8 @@ router.get('/tenders/:id',run(async (req,res) => {
 router.use('/admin',admin);
 const upload = multer({storage:multer.memoryStorage(), limits:{fileSize:5*1024*1024,files:1}});
 async function uploadCatalogs() {
-  return Object.fromEntries(await Promise.all(Object.entries(catalogFields).map(async ([key,[table]]) => [key,(await pool.query(`SELECT * FROM ${table}`)).rows])));
+  const entries=await Promise.all(Object.entries(catalogFields).map(async ([key,[table]]) => [key,(await pool.query(`SELECT * FROM ${table}`)).rows]));
+  return {...Object.fromEntries(entries),players:(await pool.query('SELECT * FROM market_players')).rows};
 }
 router.get('/admin/tenders/template.xlsx',run(async(req,res)=> {
   res.setHeader('Content-Disposition','attachment; filename="tenders-template.xlsx"');

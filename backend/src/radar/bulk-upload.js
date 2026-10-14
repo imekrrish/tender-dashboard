@@ -1,4 +1,5 @@
 import XLSX from 'xlsx';
+import {parseReferenceSheet,appendReferenceSheets} from './reference-workbook.js';
 import { schema, validate, invalid } from './validation.js';
 
 export const catalogFields = {
@@ -11,7 +12,8 @@ export const uploadFields = Object.keys(schema.tenders).filter(k => !schema.tend
 const normalize = value => String(value).trim().toLowerCase().replace(/\s+/g, '_');
 export function parseWorkbook(buffer, catalogs) {
   let workbook;
-  try { workbook = XLSX.read(buffer, {type:'buffer', cellDates:true}); } catch { invalid('Cannot read this Excel workbook'); }
+  try { workbook = XLSX.read(buffer, {type:'buffer', cellDates:true, cellNF:true}); } catch { invalid('Cannot read this Excel workbook'); }
+  if(workbook.Sheets.DB_Samples_rows)return parseReferenceSheet(workbook.Sheets.DB_Samples_rows,catalogs);
   const sheet = workbook.Sheets.Tenders || workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet || sheet['!ref'] && XLSX.utils.decode_range(sheet['!ref']).e.r > 1000) invalid('Upload at most 1,000 tenders per workbook');
   const grid = XLSX.utils.sheet_to_json(sheet, {header:1, defval:null, blankrows:true});
@@ -59,23 +61,29 @@ export async function insertTenders(client, rows) {
       const keys = Object.keys(data);
       await client.query(`INSERT INTO tenders (${keys.join(',')}) VALUES (${keys.map((_,i)=>`$${i+1}`).join(',')})`, Object.values(data));
     }
+    for(const table of ['market_players','tender_eligibility','tender_documents','tender_auction_meta','tender_bid_results'])for(const data of rows.related?.[table]||[]) {
+      const keys=Object.keys(data);
+      await client.query(`INSERT INTO ${table} (${keys.join(',')}) VALUES (${keys.map((_,i)=>`$${i+1}`).join(',')})`,Object.values(data));
+    }
     await client.query('COMMIT');
   } catch (e) { await client.query('ROLLBACK'); throw e; }
 }
 export function templateWorkbook(catalogs) {
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([uploadFields]), 'Tenders');
+
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
-    ['Instructions'], ['Fill the Tenders sheet, one tender per row; keep all column headers.'],
-    ['Required: '+uploadFields.filter(k=>schema.tenders[k].required).join(', ')],
-    ['Use existing catalog codes from reference sheets for country_id, product_id, scope_id, authority_id.'],
+    ['Instructions'], ['Fill DB_Samples_rows: Tenders_Master, Eligibility, Documents and Auction_BI. Keep section titles and headers.'],
+    ['Required: Tender ID, Tender Title, Tendering Authority, Scope of Tender, Product, Tender Open Date, Tender Close Date, Total Capacity (MW), Type of PV, Country, State.'],
+    ['Use catalog names or codes for Tendering Authority, Scope of Tender, Product and Country. Link sections using Tender ID.'],
     ['Dates: Excel dates or YYYY-MM-DD; timestamps may include a timezone, e.g. 2026-10-30T12:00:00Z.'],
     ['Future opening date = Upcoming; opening date today or earlier with closing timestamp not passed = Open; closing timestamp passed = Archived. Use timezone-qualified timestamps.'],
     ['Maximum 1,000 rows. Any invalid or duplicate record cancels the whole upload; existing tenders are never overwritten.'],
-    ['Separate tags with semicolons. Boolean fields use true or false.']
+    ['Separate Analysis Tags with semicolons. Booleans accept Yes/No. Excel percentage values (5%) convert to 5 percentage points. Blank / N/A optional numbers are accepted.'],
+    ['SQL tab is reference only and is never executed. Audit columns are preserved as source context. Excel timestamps are interpreted as UTC; use ISO timestamps with timezone for local cutoffs.']
   ]), 'Instructions');
   for (const [key,[,pk,code]] of Object.entries(catalogFields)) {
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet((catalogs[key] || []).map(r=>({code:r[code],name:r.name,id:r[pk]}))), key);
   }
+  appendReferenceSheets(workbook);
   return XLSX.write(workbook, {type:'buffer',bookType:'xlsx'});
 }

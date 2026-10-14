@@ -17,8 +17,8 @@ The prepared data is provided privately. The production DB connection is still r
 ## Excel bulk upload in the browser
 
 Open **Master Tables (CRUD)**, sign in with the admin PIN, and select **Tenders**.
-Download the Excel template, fill its **Tenders** sheet, then select **Upload Excel**.
-Reference sheets list existing country, product, scope and authority codes. Create missing
+Download the Excel template, fill its **DB_Samples_rows** tab, then select **Upload Excel**.
+Reference sheets list existing country, product, scope and authority names and codes. Create missing
 catalog entries first, then download a fresh template. Required columns are listed on the
 Instructions sheet. Use real Excel dates or ISO dates; include a timezone for timestamps.
 
@@ -43,3 +43,25 @@ Tender document links appear under **Tender Details and Documents (Official Port
 Endpoints (admin authentication required):
 - `GET /api/radar/admin/tenders/template.xlsx`
 - `POST /api/radar/admin/tenders/upload` with multipart field `file`
+
+## Original workbook format
+
+The download's final two tabs are **DB_Samples_SQL** and **DB_Samples_rows**,
+matching the supplied workbook. DB_Samples_rows retains the four original section
+titles and every original column heading, in the same order: Tenders_Master,
+Eligibility, Documents, Auction_BI. Blank input rows occupy the sample row positions;
+insert additional rows above the next section heading as needed.
+
+Upload the complete workbook or the downloaded template. The importer selects
+DB_Samples_rows regardless of other tabs, and links all sections by Tender ID.
+Names and codes resolve against existing country/product/scope/authority catalogs.
+Create missing catalog records first. Winning developers and EPC contractors use
+existing matching market players or are created in the same import transaction.
+
+Tender, eligibility, document, auction and winning-bid records are saved together.
+SQL sheet contents are reference only and are never executed. Original source fields,
+including document format, portal link and audit columns, are retained as source context.
+Optional N/A numeric cells stay empty; text commercial terms remain text. Native Excel
+percentages convert to percentage points, e.g. 5% becomes 5 in percentage columns.
+Excel timestamps are treated as UTC; use ISO timestamps with an explicit offset for
+local cutoffs. The earlier flat Tenders upload format remains accepted for compatibility.
