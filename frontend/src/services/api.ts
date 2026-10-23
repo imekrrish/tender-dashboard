@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { createApiClient } from './httpClient';
 import type {
   PriceIndexFilters,
   PriceIndexMeta,
@@ -13,12 +13,7 @@ const origin = (rawApiUrl && rawApiUrl.length > 0 ? rawApiUrl : '')
   .replace(/\/api$/, '');
 const API_BASE_URL = `${origin}/api`;
 
-export const api = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
+export const api = createApiClient(API_BASE_URL);
 
 export interface ColumnMetadata {
   key: string;

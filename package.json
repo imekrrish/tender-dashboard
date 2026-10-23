@@ -6,7 +6,7 @@
     "start": "npm --prefix backend start",
     "migrate": "npm --prefix backend run migrate",
     "build": "npm --prefix frontend run build",
-    "test": "npm --prefix backend test",
+    "test": "npm --prefix backend test && npm --prefix frontend test",
     "import:tenders": "npm --prefix backend run import:tenders --",
     "seed": "npm --prefix backend run seed",
     "deploy:prepare": "npm run migrate && npm run seed"
