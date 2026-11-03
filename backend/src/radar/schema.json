@@ -92,7 +92,7 @@
       "generated": false
     },
     "name": {
-      "type": "VARCHAR(100)",
+      "type": "TEXT",
       "required": true,
       "generated": false
     },
@@ -192,7 +192,7 @@
     },
     "state": {
       "type": "VARCHAR(100)",
-      "required": true,
+      "required": false,
       "generated": false
     },
     "site_location": {
@@ -236,8 +236,8 @@
       "generated": false
     },
     "total_capacity_mw": {
-      "type": "NUMERIC(10, 2)",
-      "required": true,
+      "type": "NUMERIC(16,6)",
+      "required": false,
       "generated": false
     },
     "dc_capacity_mwp": {
@@ -247,7 +247,7 @@
     },
     "pv_type": {
       "type": "VARCHAR(100)",
-      "required": true,
+      "required": false,
       "generated": false
     },
     "module_tech": {
