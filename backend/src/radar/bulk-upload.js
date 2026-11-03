@@ -1,5 +1,6 @@
 import XLSX from 'xlsx';
 import {parseReferenceSheet,appendReferenceSheets} from './reference-workbook.js';
+import {parseSeciSheet} from './seci-workbook.js';
 import { schema, validate, invalid } from './validation.js';
 
 export const catalogFields = {
@@ -14,6 +15,7 @@ export function parseWorkbook(buffer, catalogs) {
   let workbook;
   try { workbook = XLSX.read(buffer, {type:'buffer', cellDates:true, cellNF:true}); } catch { invalid('Cannot read this Excel workbook'); }
   if(workbook.Sheets.DB_Samples_rows)return parseReferenceSheet(workbook.Sheets.DB_Samples_rows,catalogs);
+  if(workbook.Sheets['SECI Tenders'])return parseSeciSheet(workbook.Sheets['SECI Tenders'],catalogs);
   const sheet = workbook.Sheets.Tenders || workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet || sheet['!ref'] && XLSX.utils.decode_range(sheet['!ref']).e.r > 1000) invalid('Upload at most 1,000 tenders per workbook');
   const grid = XLSX.utils.sheet_to_json(sheet, {header:1, defval:null, blankrows:true});
@@ -56,8 +58,15 @@ export function parseWorkbook(buffer, catalogs) {
 export async function insertTenders(client, rows) {
   await client.query('BEGIN');
   try {
+    const catalogIds = new Map();
+    for (const {table, pk, data} of rows.catalogs || []) {
+      const keys = Object.keys(data);
+      const result = await client.query(`INSERT INTO ${table} (${keys.join(',')}) VALUES (${keys.map((_,i)=>`$${i+1}`).join(',')}) ON CONFLICT (code) DO UPDATE SET code=EXCLUDED.code RETURNING ${pk}`, Object.values(data));
+      catalogIds.set(data[pk], result.rows[0][pk]);
+    }
     for (const row of rows) {
       const data = {...row, last_edited_by:'admin-excel'};
+      for (const key of Object.keys(catalogFields)) if (catalogIds.has(data[key])) data[key] = catalogIds.get(data[key]);
       const keys = Object.keys(data);
       await client.query(`INSERT INTO tenders (${keys.join(',')}) VALUES (${keys.map((_,i)=>`$${i+1}`).join(',')})`, Object.values(data));
     }
@@ -73,13 +82,14 @@ export function templateWorkbook(catalogs) {
 
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
     ['Instructions'], ['Fill DB_Samples_rows: Tenders_Master, Eligibility, Documents and Auction_BI. Keep section titles and headers.'],
-    ['Required: Tender ID, Tender Title, Tendering Authority, Scope of Tender, Product, Tender Open Date, Tender Close Date, Total Capacity (MW), Type of PV, Country, State.'],
+    ['Also accepted: the SECI Tenders single-sheet template (33 original columns), with an optional Notes tab.'],
+    ['Required: Tender ID, Tender Title, Tendering Authority, Scope of Tender, Product, Tender Open Date, Tender Close Date, Country. Capacity, Type of PV and State may be blank when unspecified.'],
     ['Use catalog names or codes for Tendering Authority, Scope of Tender, Product and Country. Link sections using Tender ID.'],
     ['Dates: Excel dates or YYYY-MM-DD; timestamps may include a timezone, e.g. 2026-10-30T12:00:00Z.'],
     ['Future opening date = Upcoming; opening date today or earlier with closing timestamp not passed = Open; closing timestamp passed = Archived. Use timezone-qualified timestamps.'],
     ['Maximum 1,000 rows. Any invalid or duplicate record cancels the whole upload; existing tenders are never overwritten.'],
     ['Separate Analysis Tags with semicolons. Booleans accept Yes/No. Excel percentage values (5%) convert to 5 percentage points. Blank / N/A optional numbers are accepted.'],
-    ['SQL tab is reference only and is never executed. Audit columns are preserved as source context. Excel timestamps are interpreted as UTC; use ISO timestamps with timezone for local cutoffs.']
+    ['SQL tab is reference only and is never executed. Audit columns are preserved as source context. DB_Samples_rows Excel timestamps use UTC; SECI Tenders timestamps use IST. Explicit ISO offsets are respected.']
   ]), 'Instructions');
   for (const [key,[,pk,code]] of Object.entries(catalogFields)) {
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet((catalogs[key] || []).map(r=>({code:r[code],name:r.name,id:r[pk]}))), key);

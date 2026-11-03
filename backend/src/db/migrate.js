@@ -6,7 +6,7 @@ try {
   await client.query('BEGIN');
   await client.query("SELECT pg_advisory_xact_lock(7042026)");
   await client.query('CREATE TABLE IF NOT EXISTS radar_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT now())');
-  for (const [version,file] of [['001','001_procurement.sql'],['002','002_source_fields.sql']]) {
+  for (const [version,file] of [['001','001_procurement.sql'],['002','002_source_fields.sql'],['003','003_seci_template.sql']]) {
     const applied = await client.query('SELECT version FROM radar_migrations WHERE version=$1',[version]);
     if (!applied.rowCount) {
       await client.query(await readFile(new URL(file, import.meta.url), 'utf8'));

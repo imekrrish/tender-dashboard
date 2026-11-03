@@ -16,6 +16,26 @@ The prepared data is provided privately. The production DB connection is still r
 
 ## Excel bulk upload in the browser
 
+### SECI single-sheet template
+
+The **SECI Tenders** sheet is also accepted directly, including the supplied
+`SECI_Tenders_03-Nov-2026.xlsx` format. Keep its 33 original headers and column
+order. The optional **Notes** sheet is ignored. Use the same **Upload Excel**
+button; no conversion into DB_Samples_rows is needed.
+
+SECI Excel closing timestamps and ISO strings without offsets are interpreted
+in **Asia/Kolkata (UTC+05:30)**. Explicit ISO offsets are respected. Opening
+dates retain their calendar date. Public status is calculated from dates;
+the source's descriptive status is retained in `source_data`.
+
+Existing catalogs are matched by name, code or ID; the SECI legal authority
+name also matches code `SECI`, and Standalone BESS matches code `BESS`.
+New products, descriptive scopes and authorities are created transactionally
+with the tenders. Countries must already exist. Source values and audit
+columns are preserved. Blank capacity, state, PV type, interconnection and
+compliance flags remain NULL. Capacities retain six decimal places in MW.
+Run `npm run migrate` before using this format (migration 003).
+
 Open **Master Tables (CRUD)**, sign in with the admin PIN, and select **Tenders**.
 Download the Excel template, fill its **DB_Samples_rows** tab, then select **Upload Excel**.
 Reference sheets list existing country, product, scope and authority names and codes. Create missing

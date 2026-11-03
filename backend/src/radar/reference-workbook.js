@@ -7,13 +7,13 @@ const normalize=v=>String(v??'').trim().toLowerCase().replace(/\s+/g,' ');
 const blank=v=>v==null || v==='';
 const catalogKeys={country_id:['country_id','iso_code'],product_id:['product_id','code'],scope_id:['scope_id','code'],authority_id:['authority_id','code']};
 const aliases={product_id:{'solar + bess':'HYBRID'},scope_id:{'tariff-based (tbcb)':'TBCB'}};
-const fields={
+export const fields={
  Tenders_Master:['@serial','tender_id','ref_number','title','authority_id','scope_id','product_id','@status','tender_open_date','tender_close_date','total_capacity_mw','storage_capacity_mwh','pv_type','module_tech','module_eff_pct','mounting_tech','storage_tech','country_id','state','city','postal_code','site_address','latitude','longitude','interconnection','substation_voltage_kv','almm_compliance_required','dcr_mandatory','link_to_tender','analysis_tags','remarks','@entry','@editor'],
  Eligibility:['@tender','emd_currency','emd_amount','emd_mode','desired_turnover','net_worth_requirement','working_capital_requirement','@value','@pbg','tender_document_fee','manufacturer','min_manf_capacity_mw','certifications','technical_track_record_text','ld_clause','ld_cap_pct','no_of_partners_allowed'],
  Documents:['@tender','document_title','doc_type','@format','@portal','document_bucket_url','@corrigendum','@published'],
  Auction_BI:['@tender','auction_completed_date','total_capacity_auctioned_mw','total_bids_received_mw','oversubscription_ratio','tariff_ceiling_rate','min_winning_tariff','@developer','allocated_capacity_mw','allocated_storage_mwh','winning_tariff','@epc','ppa_signed','scheduled_cod_date'],
 };
-function convert(table,key,value,catalogs,cellFormat) {
+export function convert(table,key,value,catalogs,cellFormat) {
  const type=schema[table][key].type;
  if(blank(value))return undefined;
  if(catalogKeys[key]) {
@@ -37,7 +37,7 @@ function convert(table,key,value,catalogs,cellFormat) {
  if(key==='mounting_tech'&&value==='Fixed Ballasted')return 'Ballasted Rooftop';
  return String(value).trim();
 }
-function rawRecord(headers,cells) {return Object.fromEntries(headers.map((h,i)=>[h,cells[i] instanceof Date?cells[i].toISOString():cells[i]??null]));}
+export function rawRecord(headers,cells) {return Object.fromEntries(headers.map((h,i)=>[h,cells[i] instanceof Date?cells[i].toISOString():cells[i]??null]));}
 export function parseReferenceSheet(sheet,catalogs) {
  if(sheet['!ref']&&XLSX.utils.decode_range(sheet['!ref']).e.r>10000)invalid('Workbook section layout exceeds 10,000 rows');
  const grid=XLSX.utils.sheet_to_json(sheet,{header:1,defval:null,blankrows:true});
