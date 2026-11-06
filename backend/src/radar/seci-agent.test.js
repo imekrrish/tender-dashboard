@@ -70,7 +70,12 @@ test('OpenAI structured extraction handles refusals and incomplete output withou
 });
 test('review preview and commit persist tender/eligibility links, audit and idempotency',async()=>{
   const db=newDb();db.registerExtension('pgcrypto',s=>s.registerFunction({name:'gen_random_uuid',returns:'uuid',implementation:randomUUID,impure:true}));
-  for(const f of ['001_procurement.sql','002_source_fields.sql','003_seci_template.sql','004_extraction.sql'])db.public.none(await readFile(new URL('../db/'+f,import.meta.url),'utf8'));
+  // pg-mem lacks DROP VIEW. The real PostgreSQL rebuild is verified separately
+  // in migrations-postgres.test.js; this suite tests review/import behavior.
+  for(const f of ['001_procurement.sql','002_source_fields.sql','003_seci_template.sql','004_extraction.sql']) {
+    const sql=await readFile(new URL('../db/'+f,import.meta.url),'utf8');
+    db.public.none(sql.replace('DROP VIEW view_taiyang_tender_radar;','').replace(/CREATE VIEW view_taiyang_tender_radar AS[\s\S]*$/, ''));
+  }
   const pool=new(db.adapters.createPg().Pool)();
   const region=(await pool.query("INSERT INTO master_regions(code,name) VALUES('SA','South Asia') RETURNING region_id")).rows[0];
   await pool.query("INSERT INTO master_countries(region_id,iso_code,name) VALUES($1,'IN','India')",[region.region_id]);
