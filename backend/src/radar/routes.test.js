@@ -13,6 +13,7 @@ test('HTTP API denies anonymous writes, persists catalog CRUD and filters databa
  const db=newDb();db.registerExtension('pgcrypto',s=>s.registerFunction({name:'gen_random_uuid',returns:'uuid',implementation:randomUUID,impure:true}));
  db.public.none(await readFile(new URL('../db/001_procurement.sql',import.meta.url),'utf8'));
  db.public.none(await readFile(new URL('../db/002_source_fields.sql',import.meta.url),'utf8'));
+ db.public.none(await readFile(new URL('../db/004_extraction.sql',import.meta.url),'utf8'));
  const adapter=new (db.adapters.createPg().Pool)();pool.query=async (...args)=>{try{return await adapter.query(args[0].replaceAll('CURRENT_DATE', `'${new Date().toISOString().slice(0,10)}'::date`),args[1]);}catch(e){if(/foreign key|still referenced/i.test(e.message))e.code='23503';throw e;}};
  pool.connect=()=>adapter.connect();
  const app=express();app.use(express.json());app.use('/api/radar',router);const server=app.listen(0,'127.0.0.1');
@@ -20,6 +21,8 @@ test('HTTP API denies anonymous writes, persists catalog CRUD and filters databa
  const request=(url,method='GET',body,auth=true)=>fetch(origin+url,{method,headers:{'Content-Type':'application/json',...(auth?{Authorization:'Bearer test-key'}:{})},body:body?JSON.stringify(body):undefined});
  try {
   assert.equal((await request('/admin/regions','POST',{code:'SA',name:'South Asia'},false)).status,401);
+  assert.equal((await request('/admin/seci/status','GET',undefined,false)).status,401);
+  assert.equal((await request('/admin/seci/status')).status,200);
   let response=await request('/admin/regions','POST',{code:'SA',name:'South Asia'});assert.equal(response.status,201);const region=await response.json();
   assert.equal((await request('/admin/regions','POST',{code:'SA',name:'Duplicate'})).status,409);
   const catalogs=await (await request('/catalogs')).json();assert.equal(catalogs.regions[0].name,'South Asia');

@@ -11,6 +11,7 @@ COPY backend/package*.json ./
 RUN npm ci --omit=dev
 
 FROM node:24-alpine AS runtime
+RUN apk add --no-cache poppler-utils
 ENV NODE_ENV=production
 WORKDIR /app
 COPY package.json ./

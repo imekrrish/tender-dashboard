@@ -1,6 +1,8 @@
 import express from 'express';
 import { serveFrontend } from './frontend.js';
 import radarRouter from './radar/router.js';
+import {pool} from './db/pool.js';
+import {startSeciWorker} from './radar/seci-jobs.js';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
@@ -74,5 +76,6 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
+  startSeciWorker(pool);
   console.log(`Backend server running on http://localhost:${PORT}`);
 });
