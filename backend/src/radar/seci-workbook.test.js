@@ -101,7 +101,10 @@ test('SECI records and new catalogs persist together after migration with NULLs 
   const db = newDb();
   db.registerExtension('pgcrypto', s => s.registerFunction({name:'gen_random_uuid', returns:'uuid', implementation:randomUUID, impure:true}));
   for (const file of ['001_procurement.sql','002_source_fields.sql','003_seci_template.sql']) {
-    db.public.none(await readFile(new URL('../db/' + file, import.meta.url), 'utf8'));
+    // pg-mem lacks DROP VIEW; migrations-postgres.test.js verifies the actual
+    // PostgreSQL dependency removal and recreation without this adaptation.
+    const sql=await readFile(new URL('../db/' + file, import.meta.url), 'utf8');
+    db.public.none(sql.replace('DROP VIEW view_taiyang_tender_radar;','').replace(/CREATE VIEW view_taiyang_tender_radar AS[\s\S]*$/, ''));
   }
   const client = new (db.adapters.createPg().Client)();
   await client.connect();
