@@ -26,3 +26,19 @@
 .radar{--color-brand-50:#faf0f2}
 .radar [class*="text-slate-"]{color:#555555}.radar [class*="text-slate-900"]{color:#000000}
 .radar [class*="bg-gradient-to-br"]{background:#D1042B}
+.radar-extraction {padding:24px;margin:20px 0;border:1px solid #cbd5e1;border-radius:12px;background:#f8fafc;}
+.radar-extraction h3 {margin:0 0 12px;font-size:18px;font-weight:650;}
+.radar-extraction p {margin:10px 0;color:#475569;line-height:1.6;}
+.radar-extraction label {display:flex;flex-direction:column;gap:8px;font-size:13px;font-weight:600;}
+.radar-extraction input,.radar-extraction select {padding:10px;border:1px solid #cbd5e1;border-radius:6px;background:white;min-width:0;}
+.radar-extract-form {display:grid;grid-template-columns:minmax(200px,1fr) 160px auto;gap:12px;align-items:end;margin:18px 0;}
+.radar-extract-files {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0;}
+.radar-extract-result {padding:16px;background:white;border:1px solid #e2e8f0;border-radius:8px;margin:20px 0;overflow-wrap:anywhere;}
+.radar-extraction details {padding:12px 0;}
+.radar-extraction summary {cursor:pointer;font-weight:600;color:#334155;}
+.radar-extraction ul {list-style:disc;padding-left:24px;line-height:1.7;}
+.radar-extraction h4 {font-weight:600;margin-top:14px;}
+.radar-extraction a {color:#0369a1;text-decoration:underline;}
+.radar-criterion {padding:14px 0;border-bottom:1px solid #e2e8f0;line-height:1.5;}
+.radar-criterion p {margin:8px 0;}
+@media(max-width:800px){.radar-extract-form,.radar-extract-files{grid-template-columns:1fr;}.radar-extraction{padding:16px;}}

@@ -1,4 +1,5 @@
 import multer from 'multer';
+import {createSeciRouter} from './seci-router.js';
 import { catalogFields, parseWorkbook, insertTenders, templateWorkbook } from './bulk-upload.js';
 import { Router } from 'express';
 import { createAdminAuth } from './admin-auth.js';
@@ -60,10 +61,11 @@ router.get('/tenders/:id',run(async (req,res) => {
   const id = uuid(req.params.id);
   const row = await pool.query(`SELECT ${columns} ${joins} WHERE t.id=$1 AND t.current_status <> 'Draft'`,[id]);
   if (!row.rowCount) return res.status(404).json({error:'Tender not found'});
-  const [documents,corrigenda,eligibility] = await Promise.all(['tender_documents','tender_corrigenda','tender_eligibility'].map(table=>pool.query(`SELECT * FROM ${table} WHERE tender_id=$1`,[id])));
-  res.json({...row.rows[0],documents:documents.rows,corrigenda:corrigenda.rows,eligibility:eligibility.rows[0] || null});
+  const [documents,corrigenda,eligibility,criteria] = await Promise.all(['tender_documents','tender_corrigenda','tender_eligibility','tender_eligibility_criteria'].map(table=>pool.query(`SELECT * FROM ${table} WHERE tender_id=$1`,[id])));
+  res.json({...row.rows[0],documents:documents.rows,corrigenda:corrigenda.rows,eligibility:eligibility.rows[0] || null,criteria:criteria.rows});
 }));
 router.use('/admin',admin);
+router.use('/admin/seci',createSeciRouter(pool));
 const upload = multer({storage:multer.memoryStorage(), limits:{fileSize:5*1024*1024,files:1}});
 async function uploadCatalogs() {
   const entries=await Promise.all(Object.entries(catalogFields).map(async ([key,[table]]) => [key,(await pool.query(`SELECT * FROM ${table}`)).rows]));
@@ -111,7 +113,7 @@ router.delete('/admin/:resource/:id',run(async(req,res)=> {
 }));
 router.use((err,req,res,next)=> {
   if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({error:'Workbook must be 5 MB or smaller'});
-  if (err.name === 'MulterError') return res.status(400).json({error:'Upload exactly one workbook in the file field'});
+  if (err.name === 'MulterError') return res.status(400).json({error:req.path.startsWith('/admin/seci/')?'Upload exactly three workbooks in the tenders, technical and financial fields':'Upload exactly one workbook in the file field'});
   if (err.code === '23505') return res.status(409).json({error:'This identifier already exists'});
   if (err.code === '23503') return res.status(409).json({error:'Related record missing or entry is still in use'});
   if (['23502','23514','22P02','22007','22008','22003'].includes(err.code)) return res.status(400).json({error:'Invalid field value'});
