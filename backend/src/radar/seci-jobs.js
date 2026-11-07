@@ -2,136 +2,283 @@ import XLSX from 'xlsx';
 import {fetchSeci,parseListing,parseDetail,readPdf,pageChunks} from './seci-source.js';
 import {extractStructured} from './seci-ai.js';
 import {digest, findExistingTenders, tenderInternalId} from './seci-workflow.js';
-const compact = value => String(value).replace(/\s+/g,' ').trim();
 
-export async function extractTenderSet(job,{get=fetchSeci,extract=extractStructured,pdfText=readPdf,findExisting=async()=>new Map(),progress=async()=>{},signal}={}) {
-  const maxCalls=Number(process.env.SECI_MAX_CALLS_PER_TENDER || 30);
-  if(!Number.isInteger(maxCalls) || maxCalls<1 || maxCalls>100) throw new Error('SECI_MAX_CALLS_PER_TENDER must be an integer from 1 to 100');
-  const root=await get(job.source_url,{signal});
-  const links=new URL(job.source_url).pathname.startsWith('/tender-details/')?[{url:job.source_url}]:parseListing(root.buffer.toString(),root.url);
-  const result={tenders:[],criteria:[],sources:[],warnings:[],discovered:links.length};
-  const discovered = new Map();
-  for (const [index, link] of links.slice(0, job.tender_limit).entries()) {
-    signal?.throwIfAborted();
-    await progress(`Tender ${index + 1}/${Math.min(links.length, job.tender_limit)}: checking SECI ID`);
-    try {
-      const detail = link.url === root.url ? root : await get(link.url, {signal});
-      const parsed = parseDetail(detail.buffer.toString(), link.url);
-      if (!discovered.has(parsed.tenderId)) discovered.set(parsed.tenderId, {link, detail, parsed});
-    } catch (error) {
-      result.warnings.push(`${link.url}: ${error.message}`);
-      result.sources.push({url:link.url,status:'Needs review',notes:error.message});
+const compact = value => String(value).replace(/\s+/g,' ').trim();
+const documentLimit = 12;
+const callLimitWarning = 'AI call limit reached; remaining content needs manual review';
+
+function limitConcurrency(limit) {
+  let active = 0;
+  const waiting = [];
+  return async task => {
+    if (active >= limit) await new Promise(resolve => waiting.push(resolve));
+    else active++;
+    try { return await task(); }
+    finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active--;
     }
+  };
+}
+
+async function mapConcurrent(items, limit, task) {
+  const schedule = limitConcurrency(limit);
+  const results = await Promise.allSettled(items.map(item => schedule(() => task(item))));
+  return results.map(result => {
+    if (result.status === 'rejected') throw result.reason;
+    return result.value;
+  });
+}
+
+async function prepareDocument(source, {get, pdfText, signal}) {
+  signal?.throwIfAborted();
+  const {buffer} = await get(source.url, {signal});
+  source.sha256 = digest(buffer);
+  const path = new URL(source.url).pathname;
+  if (/\.pdf$/i.test(path)) {
+    const pages = await pdfText(buffer);
+    const sparse = pages.filter(page => page.replace(/\s/g,'').length < 80).length;
+    if (sparse > pages.length * 0.3) {
+      if (buffer.length > 10 * 1024 * 1024 || pages.length > 100) {
+        throw new Error('Scanned/mixed PDF requires manual OCR (vision limit: 10 MB / 100 pages)');
+      }
+      return {
+        chunks:['Read the attached PDF, including scanned pages. Use physical PDF page numbers. Eligibility must include a source excerpt.'],
+        pdf:buffer, status:'Vision extracted', notes:'Scanned/mixed pages: verify excerpts and page references manually',
+      };
+    }
+    return {
+      chunks:pageChunks(pages), pages:pages.map(compact), status:'Read',
+      notes:sparse ? `${sparse} low-text pages may contain scans/diagrams; verify manually` : '',
+      warn:!!sparse,
+    };
+  }
+  if (/\.xlsx?$/i.test(path)) {
+    const workbook = XLSX.read(buffer, {type:'buffer'});
+    const text = workbook.SheetNames.map(name => `[SHEET ${name}]\n${XLSX.utils.sheet_to_csv(workbook.Sheets[name])}`).join('\n');
+    if (text.length > 150000) throw new Error('Workbook exceeds extraction size limit');
+    return {chunks:pageChunks([text]).map(chunk => chunk.replace(/\[PDF PAGE \d+\]/g,'[SPREADSHEET TEXT]')), status:'Read'};
+  }
+  throw new Error('Unsupported document format; review manually');
+}
+
+async function extractTender({link, parsed, pageSha}, existing, options) {
+  const {request, maxCalls, signal, documentProgress} = options;
+  const tenderId = parsed.tenderId;
+  const tender = {
+    ...parsed.metadata, tender_id:tenderId, url:link.url,
+    tn_tender_id:existing?.id ?? tenderInternalId({tender_id:tenderId}),
+    database_entry_date:existing?.database_entry_date,
+    eligibility:{},
+  };
+  const warnings = [], sources = [];
+  const criteria = new Map();
+  let callsRemaining = maxCalls;
+  const ask = (text, source, pdf) => request({
+    text:`Tender ID: ${tenderId}\nSource URL: ${source.url}\nSource title: ${source.title}\nSource listing: ${source.context ?? ''}\n${text}`,
+    pdf, signal,
+  });
+
+  function apply(output, text, source, {pages,pdf} = {}) {
+    for (const [key,value] of Object.entries(output.tender)) {
+      if (key === 'closing_date' && value && tender[key] && Date.parse(value) !== Date.parse(tender[key])) {
+        warnings.push(`${tenderId}: conflicting closing date in ${source.url}: ${value}; listing shows ${tender[key]}. Verify amendments before approval.`);
+      }
+      if (value != null && tender[key] == null) tender[key] = value;
+    }
+    for (const [key,value] of Object.entries(output.eligibility ?? {})) {
+      if (value == null) continue;
+      if (tender.eligibility[key] == null) tender.eligibility[key] = value;
+      else if (tender.eligibility[key] !== value) {
+        warnings.push(`${tenderId}: conflicting ${key} in ${source.title}; verify the summary before approving.`);
+      }
+    }
+    if (source.url !== link.url) {
+      for (const [key,value] of Object.entries(output.document ?? {})) {
+        if (value != null && source[key] == null) source[key] = value;
+      }
+    }
+    const sourceText = !pages && !pdf ? compact(text) : null;
+    for (const criterion of output.criteria) {
+      if (!['Technical','Financial','General'].includes(criterion.category) || !criterion.requirement || !criterion.quote) {
+        warnings.push(`${tenderId}: omitted a criterion without source evidence`);
+        continue;
+      }
+      const quote = compact(criterion.quote);
+      if (pages && (!Number.isInteger(criterion.page) || !pages[criterion.page-1]?.includes(quote))) {
+        warnings.push(`${tenderId}: source excerpt/page could not be verified; criterion omitted (${criterion.requirement.slice(0,80)})`);
+        continue;
+      }
+      if (sourceText != null && !sourceText.includes(quote)) {
+        warnings.push(`${tenderId}: unverified source excerpt omitted`);
+        continue;
+      }
+      const criterionId = digest([tenderId,source.url,criterion.category,criterion.clause,criterion.requirement]);
+      if (!criteria.has(criterionId)) {
+        criteria.set(criterionId, {...criterion, page:pages || pdf ? criterion.page : null,
+          tender_id:tenderId, source_url:source.url, criterion_id:criterionId, extraction_method:pdf ? 'PDF vision' : 'Text'});
+      }
+    }
+    warnings.push(...output.warnings.map(warning => `${tenderId}: ${warning}`));
   }
 
+  const pageSource = {tender_id:tenderId,url:link.url,title:'Tender detail page',sha256:pageSha,status:'Read',notes:''};
+  callsRemaining--;
+  apply(await ask(parsed.text, pageSource), parsed.text, pageSource);
+  sources.push(pageSource);
+
+  const documents = parsed.documents.map(doc => {
+    const source = {tender_id:tenderId,url:doc.url,title:doc.title,context:doc.context,sha256:null,status:'Pending',notes:''};
+    if (/corrigend|amendment|addendum/i.test(doc.url+' '+doc.context)) {
+      source.is_corrigendum = true;
+      warnings.push(`${tenderId}: amendment found (${doc.title}); resolve superseded dates and conditions before approval`);
+    }
+    return source;
+  });
+  sources.push(...documents);
+  function markForReview(source, notes) {
+    source.status = 'Needs review';
+    source.notes = notes;
+    warnings.push(`${tenderId}: ${source.title}: ${notes}`);
+  }
+
+  // Read two files at a time to bound PDF memory. Reserve the AI budget in
+  // source order, and apply results in that order even if requests finish out of order.
+  for (let offset = 0; offset < Math.min(documentLimit,documents.length); offset += 2) {
+    signal?.throwIfAborted();
+    const group = documents.slice(offset, Math.min(offset + 2, documentLimit));
+    if (!callsRemaining) {
+      group.forEach(source => markForReview(source, callLimitWarning));
+      continue;
+    }
+    const prepared = await Promise.allSettled(group.map(source => prepareDocument(source, options)));
+    const plans = prepared.map((item,index) => {
+      const source = group[index];
+      if (item.status === 'rejected') {
+        markForReview(source,item.reason.message);
+        return null;
+      }
+      const file = item.value;
+      const chunks = file.chunks.slice(0,callsRemaining);
+      callsRemaining -= chunks.length;
+      return {source,file,chunks,truncated:chunks.length < file.chunks.length};
+    });
+    const responses = await Promise.all(plans.map(plan => plan && Promise.allSettled(
+      plan.chunks.map(text => ask(text,plan.source,plan.file.pdf))
+    )));
+    signal?.throwIfAborted();
+    for (const [index, plan] of plans.entries()) {
+      if (!plan) continue;
+      const {source,file,chunks,truncated} = plan;
+      const errors = truncated ? [callLimitWarning] : [];
+      responses[index].forEach((response,i) => {
+        if (response.status === 'fulfilled') apply(response.value,chunks[i],source,file);
+        else errors.push(response.reason.message);
+      });
+      if (errors.length) markForReview(source,[...new Set(errors)].join(' · '));
+      else {
+        source.status = file.status;
+        source.notes = file.notes ?? '';
+        if (file.warn) warnings.push(`${tenderId}: ${source.title}: ${source.notes}`);
+      }
+    }
+    await documentProgress(group.length);
+  }
+  for (const source of documents.slice(documentLimit)) markForReview(source,'12-document limit reached; review remaining documents manually');
+  if (!documents.length) warnings.push(`${tenderId}: no public tender documents found; external portal/manual documents may be needed`);
+  for (const category of ['Technical','Financial']) {
+    if (![...criteria.values()].some(item => item.category === category)) {
+      warnings.push(`${tenderId}: ${category.toLowerCase()} eligibility not found`);
+    }
+  }
+  return {tender,criteria:[...criteria.values()],sources,warnings};
+}
+
+export async function extractTenderSet(job, {
+  get=fetchSeci, extract=extractStructured, pdfText=readPdf, findExisting=async()=>new Map(),
+  progress=async()=>{}, signal, aiConcurrency=Number(process.env.SECI_AI_CONCURRENCY || 4),
+} = {}) {
+  const maxCalls = Number(process.env.SECI_MAX_CALLS_PER_TENDER || 30);
+  if (!Number.isInteger(maxCalls) || maxCalls < 1 || maxCalls > 100) throw new Error('SECI_MAX_CALLS_PER_TENDER must be an integer from 1 to 100');
+  if (!Number.isInteger(aiConcurrency) || aiConcurrency < 1 || aiConcurrency > 8) throw new Error('SECI_AI_CONCURRENCY must be an integer from 1 to 8');
+
+  const root = await get(job.source_url,{signal});
+  const links = new URL(job.source_url).pathname.startsWith('/tender-details/')
+    ? [{url:job.source_url}] : parseListing(root.buffer.toString(),root.url);
+  const selected = links.slice(0,job.tender_limit);
+  const result = {tenders:[],criteria:[],sources:[],warnings:[],discovered:links.length};
+  await progress(`Checking SECI IDs for ${selected.length} tenders`);
+  const pages = await mapConcurrent(selected,4,async link => {
+    signal?.throwIfAborted();
+    try {
+      const detail = link.url === root.url ? root : await get(link.url,{signal});
+      return {link,parsed:parseDetail(detail.buffer.toString(),link.url),pageSha:digest(detail.buffer)};
+    } catch (error) {
+      return {link,error};
+    }
+  });
+  signal?.throwIfAborted();
+
+  const discovered = new Map();
+  for (const page of pages) {
+    if (page.error) {
+      result.warnings.push(`${page.link.url}: ${page.error.message}`);
+      result.sources.push({url:page.link.url,status:'Needs review',notes:page.error.message});
+    } else if (!discovered.has(page.parsed.tenderId)) discovered.set(page.parsed.tenderId,page);
+  }
   const existing = await findExisting([...discovered.keys()]);
   const choices = job.result?.choices ?? {};
   const duplicates = [];
   for (const [tenderId] of discovered) {
     const match = existing.get(tenderId);
     if (match && choices[tenderId]?.id !== match.id) {
-      duplicates.push({tender_id:tenderId, tn_tender_id:match.id, title:match.title});
+      duplicates.push({tender_id:tenderId,tn_tender_id:match.id,title:match.title});
     }
   }
-  if (duplicates.length) return {...result, duplicates, choices};
+  if (duplicates.length) return {...result,duplicates,choices};
 
+  const pending = [...discovered.values()].filter(page => choices[page.parsed.tenderId]?.action !== 'skip');
   result.choices = choices;
-  result.skipped = 0;
-  for (const {link, detail, parsed} of discovered.values()) {
+  result.skipped = discovered.size - pending.length;
+  const scheduleAI = limitConcurrency(aiConcurrency);
+  const request = input => scheduleAI(() => {
     signal?.throwIfAborted();
-    const match = existing.get(parsed.tenderId);
-    if (choices[parsed.tenderId]?.action === 'skip') {
-      result.skipped++;
-      continue;
-    }
+    return extract(input);
+  });
+  let completed = 0, documentsChecked = 0;
+  let progressWrite = Promise.resolve();
+  const report = () => {
+    const message = `${completed}/${pending.length} tenders processed · ${documentsChecked} linked documents checked`;
+    progressWrite = progressWrite.then(() => progress(message));
+    return progressWrite;
+  };
+  if (pending.length) await report();
+  const extracted = await mapConcurrent(pending,3,async page => {
+    signal?.throwIfAborted();
+    let outcome;
     try {
-      await progress(`${parsed.tenderId}: extracting tender and eligibility fields`);
-      const tender = {
-        ...parsed.metadata, tender_id:parsed.tenderId, url:link.url,
-        tn_tender_id:match?.id ?? tenderInternalId({tender_id:parsed.tenderId}),
-        database_entry_date:match?.database_entry_date,
-        eligibility:{},
-      };
-      const sources = [];
-      let calls=0;
-      const consume=async(text,source,pages,pdf)=> {
-        if(calls>=maxCalls) throw new Error('AI call limit reached; remaining content needs manual review');
-        calls++;
-        const output=await extract({text:`Tender ID: ${parsed.tenderId}\nSource URL: ${source.url}\nSource title: ${source.title}\nSource listing: ${source.context ?? ''}\n${text}`,pdf,signal});
-        for(const [key,value] of Object.entries(output.tender)) {
-          if(key==='closing_date' && value && tender[key] && Date.parse(value)!==Date.parse(tender[key])) result.warnings.push(`${parsed.tenderId}: conflicting closing date in ${source.url}: ${value}; listing shows ${tender[key]}. Verify amendments before approval.`);
-          if(value!=null && tender[key]==null) tender[key]=value;
-        }
-        for (const [key, value] of Object.entries(output.eligibility ?? {})) {
-          if (value == null) continue;
-          if (tender.eligibility[key] == null) tender.eligibility[key] = value;
-          else if (tender.eligibility[key] !== value) {
-            result.warnings.push(`${parsed.tenderId}: conflicting ${key} in ${source.title}; verify the summary before approving.`);
-          }
-        }
-        if (source.url !== link.url) {
-          for (const [key, value] of Object.entries(output.document ?? {})) {
-            if (value != null && source[key] == null) source[key] = value;
-          }
-        }
-        for(const c of output.criteria) {
-          if(!['Technical','Financial','General'].includes(c.category) || !c.requirement || !c.quote) {result.warnings.push(`${parsed.tenderId}: omitted a criterion without source evidence`);continue;}
-          if(pages && (!Number.isInteger(c.page) || c.page<1 || c.page>pages.length || !compact(pages[c.page-1]).includes(compact(c.quote)))) {
-            result.warnings.push(`${parsed.tenderId}: source excerpt/page could not be verified; criterion omitted (${c.requirement.slice(0,80)})`);continue;
-          }
-          if(!pages && !pdf && !compact(text).includes(compact(c.quote))) {result.warnings.push(`${parsed.tenderId}: unverified source excerpt omitted`);continue;}
-          if(!pages && !pdf) c.page=null;
-          const criterion_id=digest([parsed.tenderId,source.url,c.category,c.clause,c.requirement]);
-          if(!result.criteria.some(old=>old.criterion_id===criterion_id)) result.criteria.push({...c,tender_id:parsed.tenderId,source_url:source.url,criterion_id,extraction_method:pdf?'PDF vision':'Text'});
-        }
-        result.warnings.push(...output.warnings.map(w=>`${parsed.tenderId}: ${w}`));
-      };
-      const pageSource={tender_id:parsed.tenderId,url:link.url,title:'Tender detail page',sha256:digest(detail.buffer),status:'Read',notes:''};
-      await consume(parsed.text,pageSource);
-      sources.push(pageSource);
-      for(const [docIndex,doc] of parsed.documents.entries()) {
-        if(/corrigend|amendment|addendum/i.test(doc.url+' '+doc.context)) result.warnings.push(`${parsed.tenderId}: amendment found (${doc.title}); resolve superseded dates and conditions before approval`);
-        const source={tender_id:parsed.tenderId,url:doc.url,title:doc.title,context:doc.context,sha256:null,status:'Pending',notes:''};
-        if (/corrigend|amendment|addendum/i.test(doc.url+' '+doc.context)) source.is_corrigendum = true;
-        sources.push(source);
-        try {
-          if(docIndex>=12) throw new Error('12-document limit reached; review remaining documents manually');
-          signal?.throwIfAborted();
-          await progress(`${parsed.tenderId}: document ${docIndex+1}/${parsed.documents.length}`);
-          const {buffer}=await get(doc.url,{signal}); source.sha256=digest(buffer);
-          if(/\.pdf$/i.test(new URL(doc.url).pathname)) {
-            const pages=await pdfText(buffer);
-            // Sparse pages may be scans, even in an otherwise searchable PDF.
-            const sparse=pages.filter(p=>p.replace(/\s/g,'').length<80).length;
-            if(sparse>pages.length*0.3) {
-              if(buffer.length>10*1024*1024 || pages.length>100) throw new Error('Scanned/mixed PDF requires manual OCR (vision limit: 10 MB / 100 pages)');
-              await consume('Read the attached PDF, including scanned pages. Use physical PDF page numbers. Eligibility must include a source excerpt.',source,null,buffer);
-              source.status='Vision extracted'; source.notes='Scanned/mixed pages: verify excerpts and page references manually';
-            } else {
-              for(const chunk of pageChunks(pages)) await consume(chunk,source,pages);
-              source.status='Read';
-              if(sparse) {source.notes=`${sparse} low-text pages may contain scans/diagrams; verify manually`;result.warnings.push(`${parsed.tenderId}: ${doc.title}: ${source.notes}`);}
-            }
-          } else if(/\.xlsx?$/i.test(new URL(doc.url).pathname)) {
-            const wb=XLSX.read(buffer,{type:'buffer'});
-            const text=wb.SheetNames.map(n=>`[SHEET ${n}]\n${XLSX.utils.sheet_to_csv(wb.Sheets[n])}`).join('\n');
-            if(text.length>150000) throw new Error('Workbook exceeds extraction size limit');
-            for(const chunk of pageChunks([text])) await consume(chunk.replace(/\[PDF PAGE \d+\]/g,'[SPREADSHEET TEXT]'),source);
-            source.status='Read';
-          } else throw new Error('Unsupported document format; review manually');
-        } catch(error) {source.status='Needs review';source.notes=error.message;result.warnings.push(`${parsed.tenderId}: ${doc.title}: ${error.message}`);}
-      }
-      if(!parsed.documents.length) result.warnings.push(`${parsed.tenderId}: no public tender documents found; external portal/manual documents may be needed`);
-      if(!result.criteria.some(c=>c.tender_id===parsed.tenderId && c.category==='Technical')) result.warnings.push(`${parsed.tenderId}: technical eligibility not found`);
-      if(!result.criteria.some(c=>c.tender_id===parsed.tenderId && c.category==='Financial')) result.warnings.push(`${parsed.tenderId}: financial eligibility not found`);
-      result.tenders.push(tender); result.sources.push(...sources);
-    } catch(error) {
-      result.warnings.push(`${link.url}: ${error.message}`);
-      result.sources.push({url:link.url,status:'Needs review',notes:error.message});
+      outcome = await extractTender(page,existing.get(page.parsed.tenderId),{
+        get,pdfText,signal,request,maxCalls,
+        documentProgress:count => {documentsChecked += count;return report();},
+      });
+    } catch (error) {
+      signal?.throwIfAborted();
+      outcome = {warnings:[`${page.link.url}: ${error.message}`],
+        sources:[{url:page.link.url,status:'Needs review',notes:error.message}],criteria:[]};
     }
+    completed++;
+    await report();
+    return outcome;
+  });
+  for (const outcome of extracted) {
+    if (outcome.tender) result.tenders.push(outcome.tender);
+    result.criteria.push(...outcome.criteria);
+    result.sources.push(...outcome.sources);
+    result.warnings.push(...outcome.warnings);
   }
-  result.warnings=[...new Set(result.warnings)];
-  result.sources.push(...result.warnings.map(notes=>({status:'Warning',notes})));
+  result.warnings = [...new Set(result.warnings)];
+  result.sources.push(...result.warnings.map(notes => ({status:'Warning',notes})));
   return result;
 }
 

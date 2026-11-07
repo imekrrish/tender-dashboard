@@ -69,6 +69,49 @@ test('extraction retains amendments, flags inaccessible documents and drops unsu
   assert.ok(result.warnings.some(w=>w.includes('403')));assert.ok(result.warnings.some(w=>w.includes('could not be verified')));
   assert.equal(result.sources.find(s=>s.url?.endsWith('/b.pdf')).status,'Needs review');
 });
+test('linked PDFs and page chunks run in parallel with a shared AI limit and stable source precedence', {timeout:2000}, async () => {
+  const detailUrl = 'https://www.seci.co.in/tender-details/one';
+  const docs = ['a','b','c','d','e'];
+  const detail = '<body>SECI000001 ' + docs.map(name => `<a href="/uploads/tenders/${name}.pdf">${name}</a>`).join(' ') + '</body>';
+  const pause = ms => new Promise(resolve => setTimeout(resolve,ms));
+  let reading = 0, maxReading = 0, activeAI = 0, maxAI = 0;
+  const finished = [];
+  let finishSecondDocument;
+  const secondDocumentFinished = new Promise(resolve => {finishSecondDocument = resolve;});
+  const result = await extractTenderSet({...job,source_url:detailUrl,tender_limit:1},{
+    aiConcurrency:2,
+    get:async url => {
+      if (url === detailUrl) return {url,buffer:Buffer.from(detail)};
+      reading++;
+      maxReading = Math.max(maxReading,reading);
+      await pause(4);
+      reading--;
+      return {url,buffer:Buffer.from(url)};
+    },
+    pdfText:async buffer => buffer.toString().endsWith('/a.pdf')
+      ? ['First page '.repeat(2300),'Second page '.repeat(2200)] : ['Tender requirements '.repeat(20)],
+    extract:async ({text}) => {
+      const source = text.match(/Source URL: (.+)/)[1];
+      const firstPage = source.endsWith('/a.pdf') && text.includes('[PDF PAGE 1]');
+      activeAI++;
+      maxAI = Math.max(maxAI,activeAI);
+      if (firstPage) await secondDocumentFinished;
+      else await Promise.resolve();
+      activeAI--;
+      finished.push(firstPage ? 'a-first' : source);
+      if (source.endsWith('/b.pdf')) finishSecondDocument();
+      return {tender:{}, eligibility:firstPage ? {emd_amount:1000} :
+        source.endsWith('/b.pdf') ? {emd_amount:2000} : {}, criteria:[],warnings:[]};
+    },
+  });
+  assert.equal(maxReading,2);
+  assert.equal(maxAI,2);
+  assert.ok(finished.findIndex(url => url.endsWith('/b.pdf')) < finished.indexOf('a-first'));
+  assert.equal(finished.length,7);
+  assert.equal(result.tenders[0].eligibility.emd_amount,1000);
+  assert.ok(result.warnings.some(warning => warning.includes('conflicting emd_amount')));
+  assert.deepEqual(result.sources.filter(source => source.url?.endsWith('.pdf')).map(source => source.title),docs);
+});
 test('existing SECI IDs pause before AI calls, then skip or re-extract using the original internal ID', async () => {
   const existingId = randomUUID();
   const listing = '<a href="/tender-details/one">One</a><a href="/tender-details/two">Two</a>';
