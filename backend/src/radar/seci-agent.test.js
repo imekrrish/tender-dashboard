@@ -2,21 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
-import {newDb} from 'pg-mem';
+import {PGlite} from '@electric-sql/pglite';
 import XLSX from 'xlsx';
 import {seciUrl,fetchSeci,parseListing,parseDetail,pageChunks,readPdf} from './seci-source.js';
 import {extractTenderSet} from './seci-jobs.js';
 import {extractStructured} from './seci-ai.js';
-import {reviewWorkbook,parseReviewFiles,previewReview,commitReview,digest} from './seci-workflow.js';
+import {reviewWorkbook,parseReviewFiles,previewReview,commitReview,digest,tenderInternalId} from './seci-workflow.js';
 
 const job={id:randomUUID(),source_url:'https://www.seci.co.in/tenders',created_at:'2026-11-06',status:'completed'};
 const criterion={criterion_id:digest('synthetic criterion'),tender_id:'SECI000001',category:'Technical',requirement:'Completed 10 MW solar project',threshold:10,unit:'MW',period:'Last 5 years',conditions:'One project OR two projects of 5 MW each; lead JV member qualifies',evidence:'Commissioning certificate',source_url:'https://www.seci.co.in/uploads/tenders/example.pdf',page:1,clause:'2.1',quote:'Completed 10 MW solar project'};
-job.result={tenders:[{tender_id:'SECI000001',url:'https://www.seci.co.in/tender-details/abc',title:'Synthetic solar tender',scope:'EPC',product:'Solar PV',publication_date:'2026-11-01',closing_date:'2026-12-01T18:00:00+05:30',country:'India',state:'Bihar',total_capacity_mw:10,pv_type:'Ground mount'}],criteria:[criterion],sources:[]};
+job.result={tenders:[{tender_id:'SECI000001',url:'https://www.seci.co.in/tender-details/abc',title:'Synthetic solar tender',scope:'EPC',product:'Solar PV',publication_date:'2026-11-01',closing_date:'2026-12-01T18:00:00+05:30',country:'India',state:'Bihar',total_capacity_mw:10,pv_type:'Ground mount',eligibility:{emd_currency:'INR',emd_amount:25000,certifications:'IEC 61215',ld_cap_pct:5}}],criteria:[criterion],sources:[{tender_id:'SECI000001',url:criterion.source_url,title:'Example tender document',category:'RfS',is_corrigendum:false,published_date:'2026-11-01'}]};
 const cats=()=>({country_id:[{country_id:randomUUID(),iso_code:'IN',name:'India'}],product_id:[{product_id:randomUUID(),code:'SOLAR',name:'Solar PV'}],scope_id:[{scope_id:randomUUID(),code:'EPC',name:'EPC'}],authority_id:[{authority_id:randomUUID(),code:'SECI',name:'SECI'}]});
 function files(approved=false) {
   return Object.fromEntries(['tenders','technical','financial'].map(kind=>{
     const buffer=reviewWorkbook(job,kind),wb=XLSX.read(buffer,{type:'buffer'}),sheet=wb.Sheets[wb.SheetNames[0]];
     if(approved && kind!=='financial') sheet[kind==='tenders'?'AH2':'N2']={t:'s',v:'Approved'};
+    if (approved) {
+      const extra = wb.Sheets[kind==='tenders' ? 'Documents' : 'Eligibility Summary'];
+      const [headers] = XLSX.utils.sheet_to_json(extra, {header:1});
+      extra[XLSX.utils.encode_cell({r:1,c:headers.indexOf('Review Status')})] = {t:'s',v:'Approved'};
+    }
     return [kind,XLSX.write(wb,{type:'buffer',bookType:'xlsx'})];
   }));
 }
@@ -38,6 +43,12 @@ test('three workbooks default to pending, preserve condition logic and enforce a
   assert.throws(()=>parseReviewFiles(files(),cats()),/No approved rows/);
   const approved=files(true),parsed=parseReviewFiles(approved,cats());
   assert.equal(parsed.tenders.length,1);assert.equal(parsed.criteria.length,1);assert.match(parsed.criteria[0].conditions,/OR/);
+  assert.equal(parsed.summaries[0].fields.emd_amount,25000);
+  assert.equal(parsed.summaries[0].fields.certifications,'IEC 61215');
+  assert.equal(parsed.documents[0].source_data['Published Date'],'2026-11-01');
+  assert.equal(new Set(parsed.links.map(link => link.internalId)).size,1);
+  assert.equal(parsed.links[0].internalId,tenderInternalId(job.result.tenders[0]));
+  assert.equal(XLSX.read(approved.tenders,{type:'buffer'}).Sheets['Tenders Review'].U2.v,'NA');
   assert.equal(parsed.tenders[0].tender_close_date,'2026-12-01T18:00:00+05:30');
   const wb=XLSX.read(approved.technical,{type:'buffer'});wb.Sheets.Extraction.B1.v=randomUUID();
   assert.throws(()=>parseReviewFiles({...approved,technical:XLSX.write(wb,{type:'buffer',bookType:'xlsx'})},cats()),/same extraction/);
@@ -58,6 +69,26 @@ test('extraction retains amendments, flags inaccessible documents and drops unsu
   assert.ok(result.warnings.some(w=>w.includes('403')));assert.ok(result.warnings.some(w=>w.includes('could not be verified')));
   assert.equal(result.sources.find(s=>s.url?.endsWith('/b.pdf')).status,'Needs review');
 });
+test('existing SECI IDs pause before AI calls, then skip or re-extract using the original internal ID', async () => {
+  const existingId = randomUUID();
+  const listing = '<a href="/tender-details/one">One</a><a href="/tender-details/two">Two</a>';
+  const seen = [];
+  const options = {
+    get:async url => ({url, buffer:Buffer.from(url === job.source_url ? listing :
+      url.endsWith('/one') ? '<body>seci000001</body>' : '<body>SECI000002</body>')}),
+    findExisting:async () => new Map([['SECI000001',{id:existingId,title:'Existing tender'}]]),
+    extract:async ({text}) => {seen.push(text); return {tender:{}, criteria:[], warnings:[]};},
+  };
+  const pending = await extractTenderSet({...job,tender_limit:2}, options);
+  assert.deepEqual(pending.duplicates,[{tender_id:'SECI000001',tn_tender_id:existingId,title:'Existing tender'}]);
+  assert.equal(seen.length,0);
+  const skip = await extractTenderSet({...job,tender_limit:2,result:{choices:{SECI000001:{id:existingId,action:'skip'}}}}, options);
+  assert.deepEqual(skip.tenders.map(t=>t.tender_id),['SECI000002']);
+  assert.equal(skip.skipped,1);
+  const replace = await extractTenderSet({...job,tender_limit:2,result:{choices:{SECI000001:{id:existingId,action:'replace'}}}}, options);
+  assert.equal(replace.tenders[0].tn_tender_id,existingId);
+  assert.equal(seen.length,3);
+});
 test('OpenAI structured extraction handles refusals and incomplete output without importing partial JSON',async()=>{
   const old=process.env.OPENAI_API_KEY;process.env.OPENAI_API_KEY='test-only';
   try {
@@ -69,14 +100,12 @@ test('OpenAI structured extraction handles refusals and incomplete output withou
   } finally {if(old===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=old;}
 });
 test('review preview and commit persist tender/eligibility links, audit and idempotency',async()=>{
-  const db=newDb();db.registerExtension('pgcrypto',s=>s.registerFunction({name:'gen_random_uuid',returns:'uuid',implementation:randomUUID,impure:true}));
-  // pg-mem lacks DROP VIEW. The real PostgreSQL rebuild is verified separately
-  // in migrations-postgres.test.js; this suite tests review/import behavior.
-  for(const f of ['001_procurement.sql','002_source_fields.sql','003_seci_template.sql','004_extraction.sql']) {
-    const sql=await readFile(new URL('../db/'+f,import.meta.url),'utf8');
-    db.public.none(sql.replace('DROP VIEW view_taiyang_tender_radar;','').replace(/CREATE VIEW view_taiyang_tender_radar AS[\s\S]*$/, ''));
+  const pool = new PGlite();
+  try {
+  for (const file of ['001_procurement.sql','002_source_fields.sql','003_seci_template.sql','004_extraction.sql']) {
+    const sql = await readFile(new URL('../db/'+file,import.meta.url),'utf8');
+    await pool.exec(sql.replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', ''));
   }
-  const pool=new(db.adapters.createPg().Pool)();
   const region=(await pool.query("INSERT INTO master_regions(code,name) VALUES('SA','South Asia') RETURNING region_id")).rows[0];
   await pool.query("INSERT INTO master_countries(region_id,iso_code,name) VALUES($1,'IN','India')",[region.region_id]);
   await pool.query("INSERT INTO master_product_segments(code,name) VALUES('SOLAR','Solar PV')");
@@ -85,34 +114,48 @@ test('review preview and commit persist tender/eligibility links, audit and idem
   await pool.query("INSERT INTO radar_extraction_jobs(id,source_url,tender_limit,status,result) VALUES($1,$2,5,'completed',$3)",[job.id,job.source_url,JSON.stringify(job.result)]);
   const catalogs={};for(const [k,table] of Object.entries({country_id:'master_countries',product_id:'master_product_segments',scope_id:'master_contract_scopes',authority_id:'tendering_authorities'}))catalogs[k]=(await pool.query(`SELECT * FROM ${table}`)).rows;
   const approved=files(true),p=await previewReview(pool,approved,catalogs);
-  assert.equal(p.summary.new,1);assert.equal(p.summary.criteria,1);assert.equal((await pool.query('SELECT * FROM tenders')).rowCount,0);
-  const client=await pool.connect();const calls=[];
-  const wrapped={query:async(sql,args)=>{calls.push(sql);if(sql.includes('pg_advisory_xact_lock'))return {rows:[]};return client.query(sql,args);}};
-  try {
-    const done=await commitReview(wrapped,p.id);assert.equal(done.already_imported,false);
+  assert.equal(p.summary.new,1);assert.equal(p.summary.criteria,1);assert.equal((await pool.query('SELECT * FROM tenders')).rows.length,0);
+    const done=await commitReview(pool,p.id);assert.equal(done.already_imported,false);
     const tender=(await pool.query('SELECT * FROM tenders')).rows[0];
+    assert.equal(tender.id,tenderInternalId(job.result.tenders[0]));
+    const summary=(await pool.query('SELECT * FROM tender_eligibility')).rows[0];
+    assert.equal(Number(summary.emd_amount),25000);
+    assert.equal(summary.certifications,'IEC 61215');
+    const doc=(await pool.query('SELECT * FROM tender_documents')).rows[0];
+    assert.equal(doc.tender_id,tender.id);
+    assert.equal(doc.source_data['Is Corrigendum'],'No');
     const c=(await pool.query('SELECT * FROM tender_eligibility_criteria')).rows[0];
     assert.equal(c.tender_id,tender.id);assert.equal(c.reviewed_data.conditions,criterion.conditions);
     assert.equal(c.extraction_job_id,job.id);assert.ok(tender.source_data.review);
-    assert.equal((await commitReview(wrapped,p.id)).already_imported,true);
+    assert.equal((await commitReview(pool,p.id)).already_imported,true);
     assert.equal((await previewReview(pool,approved,catalogs)).already_imported,true);
-    assert.equal((await pool.query('SELECT * FROM tenders')).rowCount,1);
+    assert.equal((await pool.query('SELECT * FROM tenders')).rows.length,1);
     const updated=files(true),wb=XLSX.read(updated.tenders,{type:'buffer'});
     wb.Sheets['Tenders Review'].D2.v='Reviewer corrected title';
     updated.tenders=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
-    const correction=await previewReview(pool,updated,catalogs);
+    const duplicate=await previewReview(pool,updated,catalogs);
+    assert.equal(duplicate.duplicates[0].tn_tender_id,tender.id);
+    const skipped=await previewReview(pool,updated,catalogs,{SECI000001:'skip'});
+    assert.equal(skipped.skipped_all,true);
+    const correction=await previewReview(pool,updated,catalogs,{SECI000001:'replace'});
     assert.equal(correction.summary.updates,1);
-    await commitReview(wrapped,correction.id);
+    await commitReview(pool,correction.id);
     assert.equal((await pool.query('SELECT * FROM tenders')).rows[0].title,'Reviewer corrected title');
-    assert.equal((await pool.query('SELECT * FROM tender_eligibility_criteria')).rowCount,1);
+    assert.equal((await pool.query('SELECT * FROM tender_eligibility_criteria')).rows.length,1);
     const criteriaOnly=files(true),pending=XLSX.read(criteriaOnly.tenders,{type:'buffer'});
     pending.Sheets['Tenders Review'].AH2.v='Pending';
     criteriaOnly.tenders=XLSX.write(pending,{type:'buffer',bookType:'xlsx'});
-    const justCriteria=await previewReview(pool,criteriaOnly,catalogs);
+    const justCriteria=await previewReview(pool,criteriaOnly,catalogs,{SECI000001:'replace'});
     assert.equal(justCriteria.summary.new,0);assert.equal(justCriteria.summary.updates,0);
-    await commitReview(wrapped,justCriteria.id);
-    assert.equal((await pool.query('SELECT * FROM tender_eligibility_criteria')).rowCount,1);
-  } finally {client.release();await pool.end();}
+    await commitReview(pool,justCriteria.id);
+    assert.equal((await pool.query('SELECT * FROM tender_eligibility_criteria')).rows.length,1);
+    assert.equal((await pool.query('SELECT * FROM tender_documents')).rows.length,1);
+
+    const tampered=files(true), wrong=XLSX.read(tampered.technical,{type:'buffer'});
+    wrong.Sheets['Technical Eligibility'].P2.v=randomUUID();
+    tampered.technical=XLSX.write(wrong,{type:'buffer',bookType:'xlsx'});
+    await assert.rejects(()=>previewReview(pool,tampered,catalogs),/TN_tenderID does not match/);
+  } finally {await pool.close();}
 });
 test('commit rolls back if database records changed after preview',async()=>{
   const calls=[],client={query:async(sql)=>{calls.push(sql);if(sql.includes('FROM radar_review_batches'))return {rows:[{created_at:new Date(),payload:{snapshot:{SECI000001:null}},summary:{}}]};if(sql.includes('FROM tenders'))return {rows:[{title:'Changed'}]};return {rows:[]};}};

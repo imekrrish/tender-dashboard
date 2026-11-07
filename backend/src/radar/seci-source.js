@@ -57,10 +57,10 @@ export function parseDetail(html, url) {
   });
   $('td,th,p,h1,h2,h3,br').append(' ');
   const text = $('body').text().replace(/[ \t]+/g,' ').replace(/\n\s*\n/g,'\n').trim();
-  const tenderId = text.match(/\bSECI\d{6}\b/)?.[0];
-  if (!tenderId) throw new Error('Tender page has no SECI Tender ID');
   const labels={};
   $('td.fw-bold').each((_,cell)=>{labels[$(cell).text().replace(/\s+/g,' ').trim()]=$(cell).next('td').text().replace(/\s+/g,' ').trim();});
+  const tenderId = (labels['Tender ID'] || text).match(/\bSECI\d{6}\b/i)?.[0].toUpperCase();
+  if (!tenderId) throw new Error('Tender page has no SECI Tender ID');
   const iso=(value,timestamp=false)=>{
     const m=value?.match(/^(\d{2})\/(\d{2})\/(\d{4})(?: (\d{2}:\d{2}:\d{2}))?$/);
     return m?`${m[3]}-${m[2]}-${m[1]}${timestamp?`T${m[4]||'00:00:00'}+05:30`:''}`:null;

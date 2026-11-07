@@ -2,7 +2,7 @@ import {Router} from 'express';
 import multer from 'multer';
 import {uuid,invalid} from './validation.js';
 import {seciUrl} from './seci-source.js';
-import {reviewWorkbook,previewReview,commitReview} from './seci-workflow.js';
+import {reviewWorkbook,previewReview,commitReview,findExistingTenders} from './seci-workflow.js';
 import {catalogFields} from './bulk-upload.js';
 const run=fn=>(req,res,next)=>Promise.resolve(fn(req,res)).catch(next);
 export function createSeciRouter(pool) {
@@ -27,14 +27,49 @@ export function createSeciRouter(pool) {
     if(!job) return res.status(404).json({error:'Extraction not found'});
     res.json(job);
   }));
+  function readDecisions(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 25 ||
+        Object.entries(value).some(([id, action]) => !/^SECI\d{6}$/.test(id) || !['replace','skip'].includes(action))) {
+      invalid('Choose Replace or Skip for each duplicate SECI tender');
+    }
+    return value;
+  }
+
+  router.get('/existing/:id', run(async (req, res) => {
+    const row = (await pool.query('SELECT * FROM tenders WHERE id=$1', [uuid(req.params.id)])).rows[0];
+    if (!row) return res.status(404).json({error:'Tender not found'});
+    res.json(row);
+  }));
+  router.post('/jobs/:id/duplicates', run(async (req, res) => {
+    const id = uuid(req.params.id);
+    const decisions = readDecisions(req.body.decisions);
+    const job = (await pool.query('SELECT * FROM radar_extraction_jobs WHERE id=$1', [id])).rows[0];
+    if (job?.status !== 'awaiting_review') invalid('This job is no longer waiting for duplicate decisions');
+    const choices = {...job.result.choices};
+    for (const duplicate of job.result.duplicates) {
+      const action = decisions[duplicate.tender_id];
+      if (!action) invalid(`Choose how to handle ${duplicate.tender_id}`);
+      choices[duplicate.tender_id] = {action, id:duplicate.tn_tender_id};
+    }
+    const result = await pool.query(`UPDATE radar_extraction_jobs SET status='queued',progress='Waiting to resume',result=$2,updated_at=now()
+      WHERE id=$1 AND status='awaiting_review' RETURNING *`, [id, JSON.stringify({...job.result, choices, duplicates:[]})]);
+    if (!result.rowCount) invalid('This job has already resumed');
+    res.json(result.rows[0]);
+  }));
   router.get('/jobs/:id/:kind.xlsx',run(async(req,res)=>{
     if(!['tenders','technical','financial'].includes(req.params.kind)) invalid('Unknown workbook');
     const job=(await pool.query('SELECT * FROM radar_extraction_jobs WHERE id=$1',[uuid(req.params.id)])).rows[0];
     if(!job?.result || !['completed','partial'].includes(job.status)) invalid('Extraction is not ready');
+    // Older jobs did not store an internal ID. Reuse the database ID if imported.
+    const legacy = job.result.tenders.filter(t => !t.tn_tender_id);
+    if (legacy.length) {
+      const existing = await findExistingTenders(pool, legacy.map(t => t.tender_id));
+      for (const tender of legacy) tender.tn_tender_id = existing.get(tender.tender_id)?.id;
+    }
     res.setHeader('Content-Disposition',`attachment; filename="${req.params.kind}-review.xlsx"`);
     res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(reviewWorkbook(job,req.params.kind));
   }));
-  const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:5*1024*1024,files:3,fields:0}}).fields([{name:'tenders',maxCount:1},{name:'technical',maxCount:1},{name:'financial',maxCount:1}]);
+  const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:5*1024*1024,files:3,fields:1,fieldSize:4096}}).fields([{name:'tenders',maxCount:1},{name:'technical',maxCount:1},{name:'financial',maxCount:1}]);
   router.post('/review/preview',upload,run(async(req,res)=>{
     const files={};
     for(const key of ['tenders','technical','financial']) {
@@ -43,7 +78,12 @@ export function createSeciRouter(pool) {
       files[key]=file.buffer;
     }
     const catalogs=Object.fromEntries(await Promise.all(Object.entries(catalogFields).map(async([key,[table]])=>[key,(await pool.query(`SELECT * FROM ${table}`)).rows])));
-    res.json(await previewReview(pool,files,catalogs));
+    let decisions = {};
+    if (req.body.decisions) {
+      try {decisions = JSON.parse(req.body.decisions);} catch {invalid('Invalid duplicate decisions');}
+      readDecisions(decisions);
+    }
+    res.json(await previewReview(pool, files, catalogs, decisions));
   }));
   router.post('/review/:id/commit',run(async(req,res)=>{
     const id=uuid(req.params.id),client=await pool.connect();

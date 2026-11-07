@@ -13,11 +13,11 @@ In **Master Tables → Tenders**, sign in with the existing admin PIN. The SECI 
 ## Workflow
 
 1. Enter the SECI URL and choose the tender count. Start extraction and follow persisted job progress. Three active/queued jobs are permitted at once. Jobs process sequentially per server process; PostgreSQL claims avoid duplicate processing across instances.
-2. Download `tenders-review.xlsx`, `technical-review.xlsx`, and `financial-review.xlsx`.
-3. Each file includes its extraction ID and a Sources tab with document URLs, hashes, status, and review notes. Technical and financial workbooks contain one condition per row; general/legal/consortium conditions are retained in the technical workbook under `General`.
-4. Correct the data, resolve amendments and AND/OR conditions, and mark accepted rows **Approved**. **Pending**, **Rejected**, and blank review statuses are skipped. Unknown values stay blank; required tender fields must be supplied before approval. Retain physical PDF page references, units, evidence, and full qualification conditions. Paste values rather than spreadsheet formulas.
+2. If a SECI Tender ID already exists, choose to re-extract it for an update, skip it, or open the saved tender for editing. After extraction, download `tenders-review.xlsx`, `technical-review.xlsx`, and `financial-review.xlsx`.
+3. Keep the portal Tender ID and the matching internal UUID in `TN_tenderID`. The tender workbook has a Documents tab, and each eligibility workbook has an Eligibility Summary tab alongside its detailed criteria. Each file includes its extraction ID and a Sources tab with document URLs, hashes, status, and review notes. Technical and financial workbooks contain one condition per row; general/legal/consortium conditions are retained in the technical workbook under `General`.
+4. Correct the data, resolve amendments and AND/OR conditions, and mark accepted rows **Approved**. **Pending**, **Rejected**, and blank review statuses are skipped. Unavailable values are shown as `NA`. Required tender fields must be supplied before approval. During an update, `NA` leaves the saved value in place. Retain physical PDF page references, units, evidence, and full qualification conditions. Paste values rather than spreadsheet formulas.
 5. Upload all three workbooks from the same extraction together (maximum 5 MB each). Preview reports new tenders, updates, field changes, approved eligibility count, and skipped rows. Nothing is inserted into tender tables during preview.
-6. Confirm the import. The whole bundle commits in one transaction. Public tender inspection shows technical, financial, and general criteria separately, with links to their sources. The existing summary editor also has separate financial, technical, and general sections. Existing summary values are retained and are not automatically recalculated from narrative criteria.
+6. Confirm the import. The whole bundle commits in one transaction. Public tender inspection shows technical, financial, and general criteria separately, with links to their sources. The existing summary editor also has separate financial, technical, and general sections. Approved summary rows update the named eligibility fields. Approved document rows save links and document metadata.
 
 Repeated confirmation or uploading exactly the same reviewed file contents does not duplicate records. Previews expire after 30 minutes. Changes to tender/criterion records after preview require a fresh upload. Original extraction results and reviewed payloads remain in PostgreSQL for audit. Corrections to an existing criterion must retain its Criterion ID. Omitted/rejected rows do not delete previously imported criteria; use the original reviewed row to correct a superseded condition. The original one-workbook imports remain available and unchanged.
 
@@ -37,7 +37,8 @@ All routes are under `/api/radar/admin/seci` and require the existing bearer adm
 
 - `GET /status`, `GET /jobs`, `POST /jobs` with `{url, limit}`, `GET /jobs/:id`
 - `GET /jobs/:id/tenders.xlsx`, `/technical.xlsx`, `/financial.xlsx`
-- `POST /review/preview`: multipart `tenders`, `technical`, `financial`
+- `POST /jobs/:id/duplicates` with `{decisions}` resumes after duplicate decisions. `GET /existing/:id` opens a saved tender for editing.
+- `POST /review/preview`: multipart `tenders`, `technical`, `financial`, with optional `decisions` JSON for newly detected duplicates
 - `POST /review/:id/commit`: commits the stored preview, not client-supplied data
 
 ## Validation
