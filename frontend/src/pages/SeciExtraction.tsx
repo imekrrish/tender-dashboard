@@ -108,7 +108,7 @@ export function SeciExtraction({adminKey,onImported,onEditExisting}:{adminKey:st
       <label>Tenders to process<input type="number" min={1} max={25} value={limit} onChange={e=>setLimit(Number(e.target.value))}/></label>
       <button className="radar-primary" disabled={busy||configured!==true}>Start extraction</button>
     </form>
-    <p>Start with 5 tenders. Downloads include document links, page references and review notes. Missing or inaccessible information is flagged for review.</p>
+    <p>Each tender may contain several linked documents. Progress shows both tenders processed and documents checked. Downloads include page references and review notes. Missing or inaccessible information is flagged for review.</p>
     {jobs.length>0&&<label>Recent extractions<select value={selected||jobs[0]?.id||''} onChange={e=>{setSelected(e.target.value);setJob(null);setJobDecisions({});}}>{jobs.map(j=><option key={j.id} value={j.id}>{new Date(j.created_at).toLocaleString()} · {j.status} · {j.id.slice(0,8)}</option>)}</select></label>}
     {job&&<div className="radar-extract-result"><p role="status"><strong>{job.status.toUpperCase()}</strong> · {job.progress}</p>{job.error&&<p role="alert">{job.error}</p>}
       {job.status === 'awaiting_review' && !!job.result?.duplicates?.length &&
