@@ -1,4 +1,4 @@
-import {dashboardWorkbook, withEligibility} from './tender-tables.js';
+import {dashboardWorkbook, eligibilityAnalyticsSql, eligibilityEntries, withEligibility} from './tender-tables.js';
 import multer from 'multer';
 import {createSeciRouter} from './seci-router.js';
 import { catalogFields, parseWorkbook, insertTenders, templateWorkbook } from './bulk-upload.js';
@@ -40,7 +40,7 @@ router.get('/tenders',run(async (req,res) => {
   const limit = Number(req.query.limit || 50), offset = Number(req.query.offset || 0);
   if (!Number.isInteger(limit) || limit < 1 || limit > 200 || !Number.isInteger(offset) || offset < 0) invalid('Invalid pagination');
   const includeEligibility = req.query.include_eligibility === 'true';
-  const [data, summary] = await Promise.all([
+  const [data, summary, analytics] = await Promise.all([
     pool.query(`SELECT ${columns}${includeEligibility ? ', to_jsonb(e) AS eligibility_summary' : ''} ${joins} WHERE ${where} ORDER BY t.tender_close_date,t.id LIMIT $${values.length+1} OFFSET $${values.length+2}`,[...values,limit,offset]),
     pool.query(`SELECT count(*)::int AS total,
     count(*) FILTER (WHERE t.import_source = 'udaya-db-samples-2026-10-12')::int AS imported_samples,
@@ -48,10 +48,11 @@ router.get('/tenders',run(async (req,res) => {
     coalesce(sum(t.storage_capacity_mwh),0) AS storage_mwh,
     coalesce(sum(t.storage_capacity_mw),0) AS storage_mw,
     count(*) FILTER (WHERE (${statusSql}) = 'Open' AND t.tender_close_date >= now() AND t.tender_close_date < now()+interval '14 days')::int AS expiring
-    ${joins} WHERE ${where}`,values)
+    ${joins} WHERE ${where}`,values),
+    req.query.include_analytics === 'true' ? pool.query(eligibilityAnalyticsSql(joins,where),values) : null,
   ]);
   const rows = includeEligibility ? await withEligibility(pool, data.rows) : data.rows;
-  res.json({data:rows,summary:summary.rows[0],limit,offset});
+  res.json({data:rows,summary:summary.rows[0],eligibility_analytics:analytics?.rows[0],limit,offset});
 }));
 router.get('/export.csv',run(async (req,res) => {
   const {where,values} = filterSql(req.query);
@@ -73,7 +74,10 @@ router.get('/tenders/:id',run(async (req,res) => {
   const row = await pool.query(`SELECT ${columns} ${joins} WHERE t.id=$1 AND t.current_status <> 'Draft'`,[id]);
   if (!row.rowCount) return res.status(404).json({error:'Tender not found'});
   const [documents,corrigenda,eligibility,criteria] = await Promise.all(['tender_documents','tender_corrigenda','tender_eligibility','tender_eligibility_criteria'].map(table=>pool.query(`SELECT * FROM ${table} WHERE tender_id=$1`,[id])));
-  res.json({...row.rows[0],documents:documents.rows,corrigenda:corrigenda.rows,eligibility:eligibility.rows[0] || null,criteria:criteria.rows});
+  const tender = row.rows[0];
+  const summary = eligibility.rows[0] ?? null;
+  res.json({...tender,documents:documents.rows,corrigenda:corrigenda.rows,eligibility:summary,criteria:criteria.rows,
+    eligibility_entries:eligibilityEntries(summary,criteria.rows,tender.link_to_tender)});
 }));
 router.use('/admin',admin);
 router.use('/admin/seci',createSeciRouter(pool));

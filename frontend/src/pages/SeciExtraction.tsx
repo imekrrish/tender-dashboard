@@ -24,7 +24,7 @@ const reviewFields: {key:TenderField;label:string}[] = [
   {key:'closing_date',label:'Closing date and time (IST)'}, {key:'mounting_tech',label:'Mounting technology (optional)'},
 ];
 const workbooks = [
-  {kind:'tenders',label:'Tenders'}, {kind:'technical',label:'Technical Eligibility'}, {kind:'financial',label:'Other Eligibility'},
+  {kind:'tenders',label:'Tenders'}, {kind:'technical',label:'Technical Eligibility'}, {kind:'financial',label:'Financial & Contractual'},
 ];
 const fail=(e:unknown)=>(e as {response?:{data?:{error?:string}}}).response?.data?.error || 'Request failed. Please retry.';
 function DuplicateChoices({duplicates, decisions, setDecisions, onEdit, onContinue, busy, importing = false, continueLabel}:{
@@ -91,7 +91,7 @@ function ExtractedReview({job,busy,onImport,onEdit,onDownload}:{
   }
   const value=(tender:Tender,key:TenderField)=>edits[tender.tender_id]?.[key] ?? tender[key] ?? '';
   return <div>
-    <TenderTables rows={tenders.map(tender=>({
+    <TenderTables showEligibility rows={tenders.map(tender=>({
       key:tender.tender_id, tenderId:tender.tender_id, title:value(tender,'title'), product:value(tender,'product'),
       capacity:tenderCapacity(tender.total_capacity_mw,tender.storage_capacity_mwh),
       deadline:value(tender,'closing_date'), source:tender.url, eligibility:tender.eligibility_entries,

@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {format, convert, rawRecord} from './reference-workbook.js';
 import {parseSeciSheet} from './seci-workbook.js';
 import {invalid, uuid, validate} from './validation.js';
-import {financialColumns, technicalColumns, legacyTechnicalColumns, otherColumns, detailHeaders, documentHeaders, isUnavailable} from './seci-columns.js';
+import {financialColumns, technicalColumns, legacyTechnicalColumns, financialContractualColumns, financialContractualSheet, detailHeaders, documentHeaders, isUnavailable} from './seci-columns.js';
 
 export const digest = value => createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex');
 export const reviewHeaders = ['Review Status','Reviewer Remarks'];
@@ -73,12 +73,12 @@ function reviewTables(job, kind) {
     }));
   } else {
     const financial = kind === 'financial';
-    add(financial ? 'Other Eligibility' : 'Technical Eligibility', criterionHeaders,
-      criteria.filter(c => byId.has(c.tender_id) && (c.category !== 'Technical') === financial).map(c => [
+    add(financial ? financialContractualSheet : 'Technical Eligibility', criterionHeaders,
+      criteria.filter(c => byId.has(c.tender_id) && (financial ? ['Financial','General'].includes(c.category) : c.category === 'Technical')).map(c => [
         c.criterion_id, c.tender_id, c.category, c.requirement, c.threshold, c.unit, c.period, c.conditions,
         c.evidence, c.source_url, c.page, c.clause, c.quote, null, null, tenderInternalId(byId.get(c.tender_id)),
       ]));
-    const columns = financial ? otherColumns : technicalColumns;
+    const columns = financial ? financialContractualColumns : technicalColumns;
     add('Eligibility Summary', detailHeaders(columns), tenders.map(t => [
       t.tender_id,
       ...columns.map(([, key]) => t.eligibility?.[key] ?? (
@@ -141,7 +141,9 @@ function readReview(buffer, name, headers, legacyHeaders) {
   const meta = wb.Sheets.Extraction;
   if (!meta) invalid('Missing Extraction sheet');
   const info = XLSX.utils.sheet_to_json(meta, {header:1, defval:null});
-  const sheetName = name === 'Other Eligibility' && !wb.Sheets[name] && wb.Sheets['Financial Eligibility'] ? 'Financial Eligibility' : name;
+  const sheetName = name === financialContractualSheet
+    ? [name,'Other Eligibility','Financial Eligibility'].find(sheet => wb.Sheets[sheet]) ?? name
+    : name;
   return {...readReviewSheet(wb, sheetName, headers, legacyHeaders), wb, jobId:info.find(row => row[0] === 'Extraction ID')?.[1]};
 }
 function included(row,index,name) {
@@ -152,7 +154,7 @@ function included(row,index,name) {
 export function parseReviewFiles(files,catalogs) {
   const t=readReview(files.tenders,'Tenders Review',tenderHeaders,legacyTenderHeaders);
   const technical=readReview(files.technical,'Technical Eligibility',criterionHeaders,legacyCriterionHeaders);
-  const financial=readReview(files.financial,'Other Eligibility',criterionHeaders,legacyCriterionHeaders);
+  const financial=readReview(files.financial,financialContractualSheet,criterionHeaders,legacyCriterionHeaders);
   return parseReviewRows(t,technical,financial,catalogs);
 }
 
@@ -195,7 +197,7 @@ function parseReviewRows(t,technical,financial,catalogs) {
   const documents = [];
   let supplementarySkipped = 0;
   if (!t.legacy) {
-    for (const [file, current, previous] of [[technical, technicalColumns, legacyTechnicalColumns], [financial, otherColumns, financialColumns]]) {
+    for (const [file, current, previous] of [[technical, technicalColumns, legacyTechnicalColumns], [financial, financialContractualColumns, financialColumns]]) {
       const sheet = file.extra ?? readReviewSheet(file.wb, 'Eligibility Summary', detailHeaders(current), undefined, detailHeaders(previous));
       const columns = sheet.previous ? previous : current;
       const seen = new Set();

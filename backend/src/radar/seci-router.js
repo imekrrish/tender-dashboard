@@ -101,7 +101,7 @@ export function createSeciRouter(pool) {
       const existing = await findExistingTenders(pool, legacy.map(t => t.tender_id));
       for (const tender of legacy) tender.tn_tender_id = existing.get(tender.tender_id)?.id;
     }
-    res.setHeader('Content-Disposition',`attachment; filename="${req.params.kind === 'financial' ? 'other-eligibility' : req.params.kind}.xlsx"`);
+    res.setHeader('Content-Disposition',`attachment; filename="${req.params.kind === 'financial' ? 'financial-and-contractual' : req.params.kind}.xlsx"`);
     res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(reviewWorkbook(job,req.params.kind));
   }));
   async function loadCatalogs() {

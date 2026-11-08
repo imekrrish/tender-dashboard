@@ -34,7 +34,7 @@ export type TenderTableRow = {
 const tabs = [
   {key:'tenders', label:'Tenders'},
   {key:'technical', label:'Technical Eligibility'},
-  {key:'other', label:'Other Eligibility'},
+  {key:'financial-contractual', label:'Financial & Contractual'},
 ] as const;
 
 export function SourceLink({url, label = 'Source ↗', page}: {url?: string | null; label?: string; page?: number}) {
@@ -50,9 +50,20 @@ export function SourceLink({url, label = 'Source ↗', page}: {url?: string | nu
   }
 }
 
-export function TenderTables({rows, loading, empty = 'No tenders to show.', onSelect, renderDetails, download}: {
+export const eligibilityLabels: Record<string,string> = {
+  Technical:'Technical Eligibility',
+  Financial:'Financial Eligibility',
+  General:'Contractual & Consortium Terms',
+};
+
+export function eligibilityValue(entry:EligibilityEntry) {
+  return entry.value ?? (entry.threshold == null ? null : [entry.threshold,entry.unit].filter(value=>value!=null).join(' '));
+}
+
+export function TenderTables({rows, loading, showEligibility = false, empty = 'No tenders to show.', onSelect, renderDetails, download}: {
   rows: TenderTableRow[];
   loading?: boolean;
+  showEligibility?: boolean;
   empty?: string;
   onSelect?: (key: string, selected: boolean) => void;
   renderDetails: (key: string) => ReactNode;
@@ -60,21 +71,21 @@ export function TenderTables({rows, loading, empty = 'No tenders to show.', onSe
 }) {
   const [tab,setTab] = useState<typeof tabs[number]['key']>('tenders');
   const [expanded,setExpanded] = useState<string>();
-  const isTenders = tab === 'tenders';
+  const isTenders = !showEligibility || tab === 'tenders';
   const entries = isTenders ? [] : rows.flatMap(row => (row.eligibility ?? [])
-    .filter(entry => (entry.category === 'Technical') === (tab === 'technical'))
+    .filter(entry => tab === 'technical' ? entry.category === 'Technical' : ['Financial','General'].includes(entry.category))
     .map(entry => ({row,entry})));
   const headers = isTenders
     ? [...(onSelect ? ['Import'] : []),'Tender ID','Title','Product','Capacity','Status','Closes','Source','Details']
     : ['Tender ID','Category','Requirement','Value / Threshold','Source'];
   return <div className="radar-tender-tables">
-    <div className="radar-tender-toolbar">
+    {(showEligibility || download)&&<div className="radar-tender-toolbar">
       <nav className="radar-catalog-tabs" aria-label="Tender tables">
         {tabs.map(item=><button key={item.key} type="button" className={tab===item.key?'selected':''}
           aria-pressed={tab===item.key} onClick={()=>setTab(item.key)}>{item.label}</button>)}
       </nav>
       {download}
-    </div>
+    </div>}
     <div className="radar-table-wrap">
       <table aria-label={tabs.find(item=>item.key===tab)?.label}>
         <thead><tr>{headers.map(header=><th key={header} scope="col">{header}</th>)}</tr></thead>
@@ -97,7 +108,7 @@ export function TenderTables({rows, loading, empty = 'No tenders to show.', onSe
               {expanded===row.key&&<tr className="radar-expanded-tender"><td colSpan={headers.length}>{renderDetails(row.key)}</td></tr>}
             </Fragment>) : entries.map(({row,entry})=><tr key={`${row.key}:${entry.id}`}>
               <td><button type="button" onClick={()=>{setExpanded(row.key);setTab('tenders');}}>{row.tenderId}</button></td>
-              <td>{entry.category}</td>
+              <td>{eligibilityLabels[entry.category]}</td>
               <td>{entry.requirement}
                 {(entry.conditions||entry.evidence||entry.period||entry.clause||entry.quote)&&<details>
                   <summary>More</summary>
@@ -108,7 +119,7 @@ export function TenderTables({rows, loading, empty = 'No tenders to show.', onSe
                   {entry.quote&&<p>{entry.quote}</p>}
                 </details>}
               </td>
-              <td>{entry.value ?? (entry.threshold == null ? '—' : [entry.threshold,entry.unit].filter(value=>value!=null).join(' '))}</td>
+              <td>{eligibilityValue(entry) ?? '—'}</td>
               <td><SourceLink url={entry.source_url} page={entry.page}/></td>
             </tr>)}
         </tbody>
