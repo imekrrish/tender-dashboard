@@ -1,3 +1,4 @@
+import {dashboardWorkbook, withEligibility} from './tender-tables.js';
 import multer from 'multer';
 import {createSeciRouter} from './seci-router.js';
 import { catalogFields, parseWorkbook, insertTenders, templateWorkbook } from './bulk-upload.js';
@@ -38,8 +39,9 @@ router.get('/tenders',run(async (req,res) => {
   const {where,values} = filterSql(req.query);
   const limit = Number(req.query.limit || 50), offset = Number(req.query.offset || 0);
   if (!Number.isInteger(limit) || limit < 1 || limit > 200 || !Number.isInteger(offset) || offset < 0) invalid('Invalid pagination');
+  const includeEligibility = req.query.include_eligibility === 'true';
   const [data, summary] = await Promise.all([
-    pool.query(`SELECT ${columns} ${joins} WHERE ${where} ORDER BY t.tender_close_date,t.id LIMIT $${values.length+1} OFFSET $${values.length+2}`,[...values,limit,offset]),
+    pool.query(`SELECT ${columns}${includeEligibility ? ', to_jsonb(e) AS eligibility_summary' : ''} ${joins} WHERE ${where} ORDER BY t.tender_close_date,t.id LIMIT $${values.length+1} OFFSET $${values.length+2}`,[...values,limit,offset]),
     pool.query(`SELECT count(*)::int AS total,
     count(*) FILTER (WHERE t.import_source = 'udaya-db-samples-2026-10-12')::int AS imported_samples,
     coalesce(sum(CASE WHEN p.code <> 'BESS' THEN t.total_capacity_mw ELSE 0 END),0) AS solar_mw,
@@ -48,7 +50,8 @@ router.get('/tenders',run(async (req,res) => {
     count(*) FILTER (WHERE (${statusSql}) = 'Open' AND t.tender_close_date >= now() AND t.tender_close_date < now()+interval '14 days')::int AS expiring
     ${joins} WHERE ${where}`,values)
   ]);
-  res.json({data:data.rows,summary:summary.rows[0],limit,offset});
+  const rows = includeEligibility ? await withEligibility(pool, data.rows) : data.rows;
+  res.json({data:rows,summary:summary.rows[0],limit,offset});
 }));
 router.get('/export.csv',run(async (req,res) => {
   const {where,values} = filterSql(req.query);
@@ -56,6 +59,14 @@ router.get('/export.csv',run(async (req,res) => {
   const fields = ['tender_id','ref_number','title','region','country','product','total_capacity_mw','storage_capacity_mwh','current_status','scope','emd_currency','emd_amount','desired_turnover','min_installed_capacity_mw','tender_close_date','link_to_tender'];
   res.setHeader('Content-Disposition','attachment; filename="procurement-radar.csv"');
   res.type('text/csv').send('\ufeff'+[fields.map(csvCell).join(','),...data.rows.map(row=>fields.map(k=>csvCell(row[k] instanceof Date ? row[k].toISOString() : row[k])).join(','))].join('\r\n'));
+}));
+router.get('/export.xlsx',run(async (req,res) => {
+  const {where,values} = filterSql(req.query);
+  const data = await pool.query(`SELECT ${columns}, to_jsonb(e) AS eligibility_summary ${joins}
+    WHERE ${where} ORDER BY t.tender_close_date,t.id`,values);
+  const tenders = await withEligibility(pool, data.rows);
+  res.setHeader('Content-Disposition','attachment; filename="procurement-radar.xlsx"');
+  res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(dashboardWorkbook(tenders));
 }));
 router.get('/tenders/:id',run(async (req,res) => {
   const id = uuid(req.params.id);

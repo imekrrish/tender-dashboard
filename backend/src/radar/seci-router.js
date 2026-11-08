@@ -1,3 +1,4 @@
+import {eligibilityEntries} from './tender-tables.js';
 import {Router} from 'express';
 import multer from 'multer';
 import {uuid,invalid} from './validation.js';
@@ -52,6 +53,13 @@ export function createSeciRouter(pool) {
   router.get('/jobs/:id',run(async(req,res)=>{
     const job=(await pool.query('SELECT * FROM radar_extraction_jobs WHERE id=$1',[uuid(req.params.id)])).rows[0];
     if(!job) return res.status(404).json({error:'Extraction not found'});
+    if (job.result?.tenders?.length) {
+      const criteria = job.result.criteria ?? [];
+      job.result.tenders = job.result.tenders.map(tender => ({
+        ...tender, eligibility_entries:eligibilityEntries(tender.eligibility,
+          criteria.filter(criterion => criterion.tender_id === tender.tender_id), tender.url),
+      }));
+    }
     res.json(job);
   }));
   function readDecisions(value) {
@@ -93,7 +101,7 @@ export function createSeciRouter(pool) {
       const existing = await findExistingTenders(pool, legacy.map(t => t.tender_id));
       for (const tender of legacy) tender.tn_tender_id = existing.get(tender.tender_id)?.id;
     }
-    res.setHeader('Content-Disposition',`attachment; filename="${req.params.kind}-review.xlsx"`);
+    res.setHeader('Content-Disposition',`attachment; filename="${req.params.kind === 'financial' ? 'other-eligibility' : req.params.kind}.xlsx"`);
     res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(reviewWorkbook(job,req.params.kind));
   }));
   async function loadCatalogs() {

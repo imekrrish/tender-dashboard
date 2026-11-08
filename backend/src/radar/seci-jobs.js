@@ -83,7 +83,7 @@ async function extractTender({link, parsed, pageSha}, existing, options) {
   function apply(output, text, source, {pages,pdf} = {}) {
     for (const [key,value] of Object.entries(output.tender)) {
       if (key === 'closing_date' && value && tender[key] && Date.parse(value) !== Date.parse(tender[key])) {
-        warnings.push(`${tenderId}: conflicting closing date in ${source.url}: ${value}; listing shows ${tender[key]}. Verify amendments before approval.`);
+        warnings.push(`${tenderId}: conflicting closing date in ${source.url}: ${value}; listing shows ${tender[key]}. Verify amendments before import.`);
       }
       if (value != null && tender[key] == null) tender[key] = value;
     }
@@ -91,7 +91,7 @@ async function extractTender({link, parsed, pageSha}, existing, options) {
       if (value == null) continue;
       if (tender.eligibility[key] == null) tender.eligibility[key] = value;
       else if (tender.eligibility[key] !== value) {
-        warnings.push(`${tenderId}: conflicting ${key} in ${source.title}; verify the summary before approving.`);
+        warnings.push(`${tenderId}: conflicting ${key} in ${source.title}; verify the summary before importing.`);
       }
     }
     if (source.url !== link.url) {
@@ -131,7 +131,7 @@ async function extractTender({link, parsed, pageSha}, existing, options) {
     const source = {tender_id:tenderId,url:doc.url,title:doc.title,context:doc.context,sha256:null,status:'Pending',notes:''};
     if (/corrigend|amendment|addendum/i.test(doc.url+' '+doc.context)) {
       source.is_corrigendum = true;
-      warnings.push(`${tenderId}: amendment found (${doc.title}); resolve superseded dates and conditions before approval`);
+      warnings.push(`${tenderId}: amendment found (${doc.title}); resolve superseded dates and conditions before import`);
     }
     return source;
   });

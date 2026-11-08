@@ -5,6 +5,7 @@ import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
 import express from 'express';
 import {createSeciRouter} from './seci-router.js';
+import {dashboardWorkbook, withEligibility} from './tender-tables.js';
 import XLSX from 'xlsx';
 import {seciUrl,fetchSeci,parseListing,parseDetail,pageChunks,readPdf} from './seci-source.js';
 import {extractTenderSet} from './seci-jobs.js';
@@ -15,18 +16,17 @@ const job={id:randomUUID(),source_url:'https://www.seci.co.in/tenders',created_a
 const criterion={criterion_id:digest('synthetic criterion'),tender_id:'SECI000001',category:'Technical',requirement:'Completed 10 MW solar project',threshold:10,unit:'MW',period:'Last 5 years',conditions:'One project OR two projects of 5 MW each; lead JV member qualifies',evidence:'Commissioning certificate',source_url:'https://www.seci.co.in/uploads/tenders/example.pdf',page:1,clause:'2.1',quote:'Completed 10 MW solar project'};
 job.result={tenders:[{tender_id:'SECI000001',url:'https://www.seci.co.in/tender-details/abc',title:'Synthetic solar tender',scope:'EPC',product:'Solar PV',publication_date:'2026-11-01',closing_date:'2026-12-01T18:00:00+05:30',country:'India',state:'Bihar',total_capacity_mw:10,pv_type:'Ground mount',eligibility:{emd_currency:'INR',emd_amount:25000,certifications:'IEC 61215',ld_cap_pct:5}}],criteria:[criterion],sources:[{tender_id:'SECI000001',url:criterion.source_url,title:'Example tender document',category:'RfS',is_corrigendum:false,published_date:'2026-11-01'}]};
 const cats=()=>({country_id:[{country_id:randomUUID(),iso_code:'IN',name:'India'}],product_id:[{product_id:randomUUID(),code:'SOLAR',name:'Solar PV'}],scope_id:[{scope_id:randomUUID(),code:'EPC',name:'EPC'}],authority_id:[{authority_id:randomUUID(),code:'SECI',name:'SECI'}]});
-function files(approved=false) {
-  return Object.fromEntries(['tenders','technical','financial'].map(kind=>{
-    const buffer=reviewWorkbook(job,kind),wb=XLSX.read(buffer,{type:'buffer'}),sheet=wb.Sheets[wb.SheetNames[0]];
-    if(approved && kind!=='financial') sheet[kind==='tenders'?'AH2':'N2']={t:'s',v:'Approved'};
-    if (approved) {
-      const extra = wb.Sheets[kind==='tenders' ? 'Documents' : 'Eligibility Summary'];
-      const [headers] = XLSX.utils.sheet_to_json(extra, {header:1});
-      extra[XLSX.utils.encode_cell({r:1,c:headers.indexOf('Review Status')})] = {t:'s',v:'Approved'};
-    }
-    return [kind,XLSX.write(wb,{type:'buffer',bookType:'xlsx'})];
-  }));
+const files = () => Object.fromEntries(['tenders','technical','financial'].map(kind=>[kind,reviewWorkbook(job,kind)]));
+
+function oldReviewSheet(wb, name, status) {
+  const [header,...rows] = XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,defval:null});
+  const internal = header.indexOf('TN_tenderID');
+  const position = ['Documents','Eligibility Summary'].includes(name) ? internal + 1 : internal;
+  header.splice(position,0,'Review Status','Reviewer Remarks');
+  for (const row of rows) row.splice(position,0,status,null);
+  wb.Sheets[name] = XLSX.utils.aoa_to_sheet([header,...rows]);
 }
+
 test('SECI URL allowlist rejects external redirects, credentials, ports and unrelated paths',async()=>{
   for(const url of ['https://localhost/tenders','http://www.seci.co.in/tenders','https://www.seci.co.in:444/tenders','https://user@www.seci.co.in/tenders','https://www.seci.co.in/../admin','https://www.seci.co.in.evil.com/tenders']) assert.throws(()=>seciUrl(url));
   assert.match(seciUrl('/uploads/tenders/a.pdf'),/^https:\/\/www.seci.co.in/);
@@ -41,23 +41,33 @@ test('HTML parser discovers documents and amendments and preserves exact online 
   assert.throws(()=>parseListing('<p>Changed site</p>'),/No tender links/);
   const chunks=pageChunks(['First page','Second page'],30);assert.equal(chunks.length,2);assert.match(chunks[1],/PDF PAGE 2/);
 });
-test('three workbooks default to pending, preserve condition logic and enforce approval and matching extraction',()=>{
-  assert.throws(()=>parseReviewFiles(files(),cats()),/No approved rows/);
-  const approved=files(true),parsed=parseReviewFiles(approved,cats());
+test('three workbooks import without approvals, preserve conditions and require matching extraction IDs',()=>{
+  const exported=files(),parsed=parseReviewFiles(exported,cats());
+  const old=XLSX.read(exported.tenders,{type:'buffer'});
+  const [headers]=XLSX.utils.sheet_to_json(old.Sheets['Tenders Review'],{header:1});
+  assert.equal(headers.includes('Review Status'),false);
+  oldReviewSheet(old,'Tenders Review','Pending');
+  oldReviewSheet(old,'Documents',null);
+  const legacy=XLSX.write(old,{type:'buffer',bookType:'xlsx'});
+  assert.equal(parseReviewFiles({...exported,tenders:legacy},cats()).tenders.length,1);
+  assert.equal(parsed.summaries[0].fields.ld_cap_pct,5);
+  const other=XLSX.read(exported.financial,{type:'buffer'});
+  assert.ok(other.Sheets['Other Eligibility']);
+  assert.ok(XLSX.utils.sheet_to_json(other.Sheets['Eligibility Summary'],{header:1})[0].includes('LD Cap (%)'));
   assert.equal(parsed.tenders.length,1);assert.equal(parsed.criteria.length,1);assert.match(parsed.criteria[0].conditions,/OR/);
   assert.equal(parsed.summaries[0].fields.emd_amount,25000);
   assert.equal(parsed.summaries[0].fields.certifications,'IEC 61215');
   assert.equal(parsed.documents[0].source_data['Published Date'],'2026-11-01');
   assert.equal(new Set(parsed.links.map(link => link.internalId)).size,1);
   assert.equal(parsed.links[0].internalId,tenderInternalId(job.result.tenders[0]));
-  assert.equal(XLSX.read(approved.tenders,{type:'buffer'}).Sheets['Tenders Review'].U2.v,'NA');
+  assert.equal(XLSX.read(exported.tenders,{type:'buffer'}).Sheets['Tenders Review'].U2.v,'NA');
   assert.equal(parsed.tenders[0].tender_close_date,'2026-12-01T18:00:00+05:30');
-  const wb=XLSX.read(approved.technical,{type:'buffer'});wb.Sheets.Extraction.B1.v=randomUUID();
-  assert.throws(()=>parseReviewFiles({...approved,technical:XLSX.write(wb,{type:'buffer',bookType:'xlsx'})},cats()),/same extraction/);
-  const formula=XLSX.read(approved.technical,{type:'buffer'});formula.Sheets['Technical Eligibility'].E2.f='1+1';
-  assert.throws(()=>parseReviewFiles({...approved,technical:XLSX.write(formula,{type:'buffer',bookType:'xlsx'})},cats()),/formulas/);
-  const bad=XLSX.read(approved.technical,{type:'buffer'});bad.Sheets['Technical Eligibility'].K2={t:'n',v:0};
-  assert.throws(()=>parseReviewFiles({...approved,technical:XLSX.write(bad,{type:'buffer',bookType:'xlsx'})},cats()),/PDF Page/);
+  const wb=XLSX.read(exported.technical,{type:'buffer'});wb.Sheets.Extraction.B1.v=randomUUID();
+  assert.throws(()=>parseReviewFiles({...exported,technical:XLSX.write(wb,{type:'buffer',bookType:'xlsx'})},cats()),/same extraction/);
+  const formula=XLSX.read(exported.technical,{type:'buffer'});formula.Sheets['Technical Eligibility'].E2.f='1+1';
+  assert.throws(()=>parseReviewFiles({...exported,technical:XLSX.write(formula,{type:'buffer',bookType:'xlsx'})},cats()),/formulas/);
+  const bad=XLSX.read(exported.technical,{type:'buffer'});bad.Sheets['Technical Eligibility'].K2={t:'n',v:0};
+  assert.throws(()=>parseReviewFiles({...exported,technical:XLSX.write(bad,{type:'buffer',bookType:'xlsx'})},cats()),/PDF Page/);
 });
 test('extraction retains amendments, flags inaccessible documents and drops unsupported evidence',async()=>{
   const listing='<a href="/tender-details/abc">View</a>';
@@ -176,7 +186,7 @@ test('review preview and commit persist tender/eligibility links, audit and idem
   await pool.query("INSERT INTO tendering_authorities(code,name) VALUES('SECI','SECI')");
   await pool.query("INSERT INTO radar_extraction_jobs(id,source_url,tender_limit,status,result) VALUES($1,$2,5,'completed',$3)",[job.id,job.source_url,JSON.stringify(job.result)]);
   const catalogs={};for(const [k,table] of Object.entries({country_id:'master_countries',product_id:'master_product_segments',scope_id:'master_contract_scopes',authority_id:'tendering_authorities'}))catalogs[k]=(await pool.query(`SELECT * FROM ${table}`)).rows;
-  const approved=files(true),p=await previewReview(pool,approved,catalogs);
+  const exported=files(),p=await previewReview(pool,exported,catalogs);
   assert.equal(p.summary.new,1);assert.equal(p.summary.criteria,1);assert.equal((await pool.query('SELECT * FROM tenders')).rows.length,0);
     const done=await commitReview(pool,p.id);assert.equal(done.already_imported,false);
     const tender=(await pool.query('SELECT * FROM tenders')).rows[0];
@@ -190,10 +200,17 @@ test('review preview and commit persist tender/eligibility links, audit and idem
     const c=(await pool.query('SELECT * FROM tender_eligibility_criteria')).rows[0];
     assert.equal(c.tender_id,tender.id);assert.equal(c.reviewed_data.conditions,criterion.conditions);
     assert.equal(c.extraction_job_id,job.id);assert.ok(tender.source_data.review);
+    const savedRows = await withEligibility(pool,[{...tender,eligibility_summary:summary}]);
+    assert.ok(savedRows[0].eligibility_entries.some(entry=>entry.category==='Technical' && entry.source_url===criterion.source_url && entry.page===1));
+    assert.ok(savedRows[0].eligibility_entries.some(entry=>entry.category==='General' && Number(entry.value)===5));
+    const dashboard = XLSX.read(dashboardWorkbook(savedRows),{type:'buffer'});
+    assert.deepEqual(dashboard.SheetNames,['Tenders','Technical Eligibility','Other Eligibility']);
+    assert.equal(XLSX.utils.sheet_to_json(dashboard.Sheets['Tenders'])[0].TN_tenderID,tender.id);
+    assert.ok(XLSX.utils.sheet_to_json(dashboard.Sheets['Other Eligibility']).some(entry=>entry.Category==='Financial'));
     assert.equal((await commitReview(pool,p.id)).already_imported,true);
-    assert.equal((await previewReview(pool,approved,catalogs)).already_imported,true);
+    assert.equal((await previewReview(pool,exported,catalogs)).already_imported,true);
     assert.equal((await pool.query('SELECT * FROM tenders')).rows.length,1);
-    const updated=files(true),wb=XLSX.read(updated.tenders,{type:'buffer'});
+    const updated=files(),wb=XLSX.read(updated.tenders,{type:'buffer'});
     wb.Sheets['Tenders Review'].D2.v='Reviewer corrected title';
     updated.tenders=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
     const duplicate=await previewReview(pool,updated,catalogs);
@@ -205,8 +222,8 @@ test('review preview and commit persist tender/eligibility links, audit and idem
     await commitReview(pool,correction.id);
     assert.equal((await pool.query('SELECT * FROM tenders')).rows[0].title,'Reviewer corrected title');
     assert.equal((await pool.query('SELECT * FROM tender_eligibility_criteria')).rows.length,1);
-    const criteriaOnly=files(true),pending=XLSX.read(criteriaOnly.tenders,{type:'buffer'});
-    pending.Sheets['Tenders Review'].AH2.v='Pending';
+    const criteriaOnly=files(),pending=XLSX.read(criteriaOnly.tenders,{type:'buffer'});
+    oldReviewSheet(pending,'Tenders Review','Rejected');
     criteriaOnly.tenders=XLSX.write(pending,{type:'buffer',bookType:'xlsx'});
     const justCriteria=await previewReview(pool,criteriaOnly,catalogs,{SECI000001:'replace'});
     assert.equal(justCriteria.summary.new,0);assert.equal(justCriteria.summary.updates,0);
@@ -214,8 +231,8 @@ test('review preview and commit persist tender/eligibility links, audit and idem
     assert.equal((await pool.query('SELECT * FROM tender_eligibility_criteria')).rows.length,1);
     assert.equal((await pool.query('SELECT * FROM tender_documents')).rows.length,1);
 
-    const tampered=files(true), wrong=XLSX.read(tampered.technical,{type:'buffer'});
-    wrong.Sheets['Technical Eligibility'].P2.v=randomUUID();
+    const tampered=files(), wrong=XLSX.read(tampered.technical,{type:'buffer'});
+    wrong.Sheets['Technical Eligibility'].N2.v=randomUUID();
     tampered.technical=XLSX.write(wrong,{type:'buffer',bookType:'xlsx'});
     await assert.rejects(()=>previewReview(pool,tampered,catalogs),/TN_tenderID does not match/);
     const original = job.result.tenders[0];
