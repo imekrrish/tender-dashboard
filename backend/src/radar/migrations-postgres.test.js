@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
 
-const sql=await Promise.all(['001_procurement.sql','002_source_fields.sql','003_seci_template.sql','004_extraction.sql'].map(name=>readFile(new URL('../db/'+name,import.meta.url),'utf8')));
+const sql=await Promise.all(['001_procurement.sql','002_source_fields.sql','003_seci_template.sql','004_extraction.sql','005_tender_technical_descriptions.sql'].map(name=>readFile(new URL('../db/'+name,import.meta.url),'utf8')));
 // PGlite runs PostgreSQL itself, including view dependency checks that pg-mem
 // does not implement. gen_random_uuid is built into its PostgreSQL engine;
 // only the optional pgcrypto installation is omitted in this test runtime.
@@ -37,10 +37,15 @@ test('PostgreSQL reproduces both view dependencies; corrected migration preserve
     const row=(await db.query('SELECT scope,total_capacity_mw,state,pv_type FROM view_taiyang_tender_radar')).rows[0];
     assert.equal(row.scope.length,1000);assert.equal(Number(row.total_capacity_mw),0.000001);assert.equal(row.state,null);assert.equal(row.pv_type,null);
     assert.equal((await db.query("SELECT count(*)::int AS n FROM information_schema.tables WHERE table_name IN ('radar_extraction_jobs','radar_review_batches','tender_eligibility_criteria')")).rows[0].n,3);
+    await db.exec('BEGIN;'+sql[4]+'COMMIT;');
+    const technology='Module technology requirements '.repeat(8), connection='Connection and evacuation requirements '.repeat(8);
+    await db.query('UPDATE tenders SET module_tech=$1,interconnection=$2',[technology,connection]);
+    assert.equal((await db.query('SELECT module_tech FROM view_taiyang_tender_radar')).rows[0].module_tech,technology);
+    assert.equal((await db.query('SELECT interconnection FROM tenders')).rows[0].interconnection,connection);
   } finally {await db.close();}
 });
 
-test('all four migrations also run in one transaction on a fresh PostgreSQL database',async()=>{
+test('all migrations also run in one transaction on a fresh PostgreSQL database',async()=>{
   const db=new PGlite();
   try {
     await db.exec('BEGIN;'+first+sql.slice(1).join('\n')+'COMMIT;');

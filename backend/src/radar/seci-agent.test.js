@@ -165,7 +165,7 @@ test('OpenAI structured extraction handles refusals and incomplete output withou
 test('review preview and commit persist tender/eligibility links, audit and idempotency',async()=>{
   const pool = new PGlite();
   try {
-  for (const file of ['001_procurement.sql','002_source_fields.sql','003_seci_template.sql','004_extraction.sql']) {
+  for (const file of ['001_procurement.sql','002_source_fields.sql','003_seci_template.sql','004_extraction.sql','005_tender_technical_descriptions.sql']) {
     const sql = await readFile(new URL('../db/'+file,import.meta.url),'utf8');
     await pool.exec(sql.replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', ''));
   }
@@ -219,24 +219,34 @@ test('review preview and commit persist tender/eligibility links, audit and idem
     tampered.technical=XLSX.write(wrong,{type:'buffer',bookType:'xlsx'});
     await assert.rejects(()=>previewReview(pool,tampered,catalogs),/TN_tenderID does not match/);
     const original = job.result.tenders[0];
-    const second = {...original,tender_id:'SECI000002',title:'Second tender',product:null};
-    const screenJob = {...job,id:randomUUID(),result:{...job.result,tenders:[original,second],batch:{
+    const technology='Bifacial photovoltaic modules compliant with the approved model and manufacturer list. '.repeat(3).trim();
+    const connection='Connect to the designated interstate transmission substation and meet all evacuation and metering requirements. '.repeat(3).trim();
+    const second = {...original,tender_id:'SECI000002',title:'Second tender',product:null,
+      mounting_tech:'single axis tracker',module_tech:technology,interconnection:connection};
+    const third = {...original,tender_id:'SECI000003',title:'Third tender',mounting_tech:'Bidder-proposed mounting design'};
+    const screenJob = {...job,id:randomUUID(),result:{...job.result,tenders:[original,second,third],batch:{
       offset:0,links:Array.from({length:12},(_,i)=>`https://www.seci.co.in/tender-details/${i+1}`),
     },criteria:[criterion,{...criterion,tender_id:second.tender_id,criterion_id:digest('second criterion')}],
       sources:[...job.result.sources,{...job.result.sources[0],tender_id:second.tender_id}],
     }};
     await pool.query("INSERT INTO radar_extraction_jobs(id,source_url,tender_limit,status,result) VALUES($1,$2,5,'completed',$3)",
       [screenJob.id,screenJob.source_url,JSON.stringify(screenJob.result)]);
-    const selection = [{tender_id:second.tender_id,corrections:{product:'Solar PV'}}];
+    const selection = [{tender_id:second.tender_id,corrections:{product:'Solar PV'}},{tender_id:third.tender_id}];
     await assert.rejects(()=>previewExtraction(pool,screenJob,[{tender_id:'SECI999999'}],catalogs),/Select tenders from this extraction/);
     const screenPreview = await previewExtraction(pool,screenJob,selection,catalogs);
-    assert.equal(screenPreview.summary.new,1);
+    assert.equal(screenPreview.summary.new,2);
     assert.equal(screenPreview.summary.criteria,1);
     assert.equal(screenPreview.summary.documents,1);
     await commitReview(pool,screenPreview.id);
     assert.equal((await previewExtraction(pool,screenJob,selection,catalogs)).already_imported,true);
     const saved = (await pool.query('SELECT * FROM tenders WHERE tender_id=$1',[second.tender_id])).rows[0];
     assert.equal(saved.title,'Second tender');
+    assert.equal(saved.mounting_tech,'Single-Axis Tracker');
+    assert.equal(saved.module_tech,technology);
+    assert.equal(saved.interconnection,connection);
+    const unmatched = (await pool.query('SELECT mounting_tech,source_data FROM tenders WHERE tender_id=$1',[third.tender_id])).rows[0];
+    assert.equal(unmatched.mounting_tech,null);
+    assert.equal(unmatched.source_data['Mounting Tech'],third.mounting_tech);
     assert.equal((await pool.query('SELECT title FROM tenders WHERE id=$1',[tender.id])).rows[0].title,'Reviewer corrected title');
 
     const app = express();

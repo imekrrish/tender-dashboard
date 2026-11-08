@@ -1,7 +1,7 @@
 import XLSX from 'xlsx';
 import {createHash, randomUUID} from 'node:crypto';
 import {format, fields, convert, rawRecord} from './reference-workbook.js';
-import {validate, invalid, statuses} from './validation.js';
+import {validate, invalid, statuses, mountingTechnologies} from './validation.js';
 
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 const blank = value => value == null || value === '';
@@ -10,6 +10,13 @@ const catalogTypes = {
   scope_id: ['master_contract_scopes', 'scope_id', 'code'],
   authority_id: ['tendering_authorities', 'authority_id', 'code'],
 };
+
+const mountingKey = value => normalize(value).replace(/[^a-z0-9]+/g, ' ').trim();
+const mountingByLabel = new Map(mountingTechnologies.map(label => [mountingKey(label), label]));
+mountingByLabel.set('fixed ballasted', 'Ballasted Rooftop');
+mountingByLabel.set('fixed tilt mounting', 'Fixed Tilt');
+mountingByLabel.set('single axis tracking', 'Single-Axis Tracker');
+mountingByLabel.set('dual axis tracking', 'Dual-Axis Tracker');
 
 // This source uses IST wall-clock Excel timestamps; ISO strings with an
 // explicit offset are already absolute instants and must not be shifted.
@@ -60,7 +67,10 @@ export function parseSeciSheet(sheet, catalogs) {
       fields.Tenders_Master.forEach((key, i) => {
         if (key.startsWith('@') || blank(cells[i])) return;
         let value = cells[i];
-        if (catalogTypes[key]) data[key] = resolveCatalog(key, value);
+        if (key === 'mounting_tech') {
+          // Keep unmatched descriptions in source_data without guessing a category.
+          data[key] = mountingByLabel.get(mountingKey(value)) ?? null;
+        } else if (catalogTypes[key]) data[key] = resolveCatalog(key, value);
         else {
           if (key === 'tender_close_date') value = istTimestamp(value);
           const converted = convert('tenders', key, value, resolved, sheet[XLSX.utils.encode_cell({r:index + 1, c:i})]?.z);
