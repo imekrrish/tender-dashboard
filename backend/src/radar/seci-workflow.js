@@ -33,14 +33,14 @@ export async function findExistingTenders(db, ids) {
   return byId;
 }
 
-function tenderCells(t, i) {
+function tenderCells(t, i, reviewStatus) {
   return [
     i+1, t.tender_id, t.ref_number, t.title, 'Solar Energy Corporation of India Limited (SECI)',
     t.scope, t.product, t.current_status, t.publication_date, t.closing_date, t.total_capacity_mw,
     t.storage_capacity_mwh, t.pv_type, t.module_tech, t.module_eff_pct, t.mounting_tech, t.storage_tech,
     t.country, t.state, t.city, t.postal_code, t.site_address, t.latitude, t.longitude,
     t.interconnection, t.substation_voltage_kv, yesNo(t.almm_required), yesNo(t.dcr_required),
-    t.url, t.analysis_tags, t.remarks, t.database_entry_date, 'OpenAI extraction', 'Pending', null,
+    t.url, t.analysis_tags, t.remarks, t.database_entry_date, 'OpenAI extraction', reviewStatus, null,
     tenderInternalId(t),
   ];
 }
@@ -56,36 +56,44 @@ function appendRows(wb, name, headers, rows) {
   XLSX.utils.book_append_sheet(wb, sheet, name);
 }
 
-export function reviewWorkbook(job, kind) {
-  const wb = XLSX.utils.book_new();
+function reviewTables(job, kind, status = 'Pending') {
+  const tables = [];
+  const add = (name, headers, rows) => tables.push({name, headers, rows});
   const {tenders, criteria, sources} = job.result;
   const byId = new Map(tenders.map(t => [t.tender_id, t]));
   if (kind === 'tenders') {
-    appendRows(wb, 'Tenders Review', tenderHeaders, tenders.map(tenderCells));
+    add('Tenders Review', tenderHeaders, tenders.map((t,i) => tenderCells(t,i,status)));
     const documents = sources.filter(s => byId.has(s.tender_id) && s.url && documentPath(s.url).startsWith('/uploads/tenders/'));
-    appendRows(wb, 'Documents', documentHeaders, documents.map(s => {
+    add('Documents', documentHeaders, documents.map(s => {
       const tender = byId.get(s.tender_id);
       const extension = documentPath(s.url).match(/\.([a-z0-9]+)$/i)?.[1]?.toUpperCase();
       return [s.tender_id, s.title, s.category, extension, tender.url, s.url, yesNo(s.is_corrigendum), s.published_date,
-        tenderInternalId(tender), 'Pending', null];
+        tenderInternalId(tender), status, null];
     }));
   } else {
     const financial = kind === 'financial';
-    appendRows(wb, financial ? 'Financial Eligibility' : 'Technical Eligibility', criterionHeaders,
+    add(financial ? 'Financial Eligibility' : 'Technical Eligibility', criterionHeaders,
       criteria.filter(c => byId.has(c.tender_id) && (c.category === 'Financial') === financial).map(c => [
         c.criterion_id, c.tender_id, c.category, c.requirement, c.threshold, c.unit, c.period, c.conditions,
-        c.evidence, c.source_url, c.page, c.clause, c.quote, 'Pending', null, tenderInternalId(byId.get(c.tender_id)),
+        c.evidence, c.source_url, c.page, c.clause, c.quote, status, null, tenderInternalId(byId.get(c.tender_id)),
       ]));
     const columns = financial ? financialColumns : technicalColumns;
-    appendRows(wb, 'Eligibility Summary', detailHeaders(columns), tenders.map(t => [
+    add('Eligibility Summary', detailHeaders(columns), tenders.map(t => [
       t.tender_id,
       ...columns.map(([, key]) => t.eligibility?.[key] ?? (
         key === 'estimated_project_value' ? t.eligibility?.estimated_project_value_terms :
           key === 'performance_bg_pct' ? t.eligibility?.performance_bg_terms : null
       )),
-      tenderInternalId(t), 'Pending', null,
+      tenderInternalId(t), status, null,
     ]));
   }
+  return tables;
+}
+
+export function reviewWorkbook(job, kind) {
+  const {sources} = job.result;
+  const wb = XLSX.utils.book_new();
+  for (const {name, headers, rows} of reviewTables(job, kind)) appendRows(wb, name, headers, rows);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['Extraction ID', job.id], ['Source URL', job.source_url], ['Created', String(job.created_at)],
     ['Instructions', 'Keep both IDs and all headers. NA means unavailable. Fill missing required fields, review sources and mark accepted rows Approved. Upload the three files together.'],
@@ -137,6 +145,10 @@ export function parseReviewFiles(files,catalogs) {
   const t=readReview(files.tenders,'Tenders Review',tenderHeaders,legacyTenderHeaders);
   const technical=readReview(files.technical,'Technical Eligibility',criterionHeaders,legacyCriterionHeaders);
   const financial=readReview(files.financial,'Financial Eligibility',criterionHeaders,legacyCriterionHeaders);
+  return parseReviewRows(t,technical,financial,catalogs);
+}
+
+function parseReviewRows(t,technical,financial,catalogs) {
   if(!t.jobId || t.jobId!==technical.jobId || t.jobId!==financial.jobId) invalid('All three files must belong to the same extraction');
   uuid(t.jobId);
   if ([technical, financial].some(file => file.legacy !== t.legacy)) invalid('Use three workbooks of the same format');
@@ -176,7 +188,7 @@ export function parseReviewFiles(files,catalogs) {
   let supplementarySkipped = 0;
   if (!t.legacy) {
     for (const [file, columns] of [[technical, technicalColumns], [financial, financialColumns]]) {
-      const sheet = readReviewSheet(file.wb, 'Eligibility Summary', detailHeaders(columns));
+      const sheet = file.extra ?? readReviewSheet(file.wb, 'Eligibility Summary', detailHeaders(columns));
       const seen = new Set();
       const statusIndex = columns.length + 2;
       for (const row of sheet.rows) {
@@ -200,7 +212,7 @@ export function parseReviewFiles(files,catalogs) {
         }
       }
     }
-    const sheet = readReviewSheet(t.wb, 'Documents', documentHeaders);
+    const sheet = t.extra ?? readReviewSheet(t.wb, 'Documents', documentHeaders);
     const seen = new Set();
     for (const row of sheet.rows) {
       if (!approved(row, 9, 'Documents')) { supplementarySkipped++; continue; }
@@ -234,6 +246,39 @@ async function findDocument(db, tenderId, url, lock = false) {
 export async function previewReview(db, files, catalogs, decisions = {}) {
   const payload = parseReviewFiles(files, catalogs);
   const job = (await db.query('SELECT * FROM radar_extraction_jobs WHERE id=$1', [payload.jobId])).rows[0];
+  const fileHashes = ['tenders','technical','financial'].map(key => [key,digest(files[key])]);
+  return previewPrepared(db, job, payload, fileHashes, decisions);
+}
+
+const editableTenderFields = new Set(['title','scope','product','country','publication_date','closing_date','mounting_tech']);
+export async function previewExtraction(db, job, selection, catalogs, decisions = {}) {
+  if (!job?.result || !['completed','partial'].includes(job.status)) invalid('Extraction is missing or not ready for review');
+  if (!Array.isArray(selection) || !selection.length || selection.length > 25) invalid('Select at least one tender to import');
+  const extracted = new Map(job.result.tenders.map(tender => [tender.tender_id,tender]));
+  const chosen = new Map();
+  for (const row of selection) {
+    if (!row || !extracted.has(row.tender_id) || chosen.has(row.tender_id)) invalid('Select tenders from this extraction');
+    const corrections = row.corrections ?? {};
+    if (!corrections || typeof corrections !== 'object' || Array.isArray(corrections) ||
+      Object.entries(corrections).some(([key,value]) => !editableTenderFields.has(key) || typeof value !== 'string' || value.length > 500)) {
+      invalid('Invalid tender corrections');
+    }
+    chosen.set(row.tender_id,Object.fromEntries(Object.keys(corrections).sort().map(key=>[key,corrections[key].trim()])));
+  }
+  const tenders = job.result.tenders.filter(tender => chosen.has(tender.tender_id))
+    .map(tender => ({...tender,...chosen.get(tender.tender_id)}));
+  const selectionKey = tenders.map(tender => [tender.tender_id,chosen.get(tender.tender_id)]);
+  const reviewedJob = {...job,result:{...job.result,tenders}};
+  const tables = kind => {
+    const [main, extra] = reviewTables(reviewedJob,kind,'Approved');
+    const data = table => ({rows:table.rows.map(row => row.map(optional)),numberFormats:new Map(),legacy:false});
+    return {...data(main),jobId:job.id,extra:data(extra)};
+  };
+  const payload = parseReviewRows(tables('tenders'),tables('technical'),tables('financial'),catalogs);
+  return previewPrepared(db,job,payload,['screen-review',job.id,selectionKey],decisions);
+}
+
+async function previewPrepared(db, job, payload, identity, decisions) {
   if (!job?.result || !['completed','partial'].includes(job.status)) invalid('Extraction is missing or not ready for review');
 
   const allowed = new Map(job.result.tenders.map(t => [t.tender_id, t]));
@@ -257,9 +302,8 @@ export async function previewReview(db, files, catalogs, decisions = {}) {
     if (sourceCriteria.has(c.criterion_id) && sourceCriteria.get(c.criterion_id) !== c.tender_id) invalid('Criterion ID cannot move to another tender');
   }
 
-  const fileHashes = ['tenders','technical','financial'].map(key => [key,digest(files[key])]);
   const skippedIds = ids.filter(id => byId.has(id) && decisions[id] === 'skip').sort();
-  const hash = digest(skippedIds.length ? [fileHashes, skippedIds] : fileHashes);
+  const hash = digest(skippedIds.length ? [identity, skippedIds] : identity);
   const imported = (await db.query('SELECT * FROM radar_review_batches WHERE digest=$1', [hash])).rows[0];
   if (imported?.committed_at) return {id:imported.id, summary:imported.summary, already_imported:true};
 
@@ -324,13 +368,13 @@ export async function commitReview(client,id) {
     const batch=(await client.query('SELECT * FROM radar_review_batches WHERE id=$1 FOR UPDATE',[id])).rows[0];
     if(!batch) invalid('Import preview not found');
     if(batch.committed_at) {await client.query('COMMIT');return {already_imported:true,summary:batch.summary};}
-    if(Date.now()-new Date(batch.created_at).getTime()>30*60000) invalid('Preview expired; upload the reviewed files again');
+    if(Date.now()-new Date(batch.created_at).getTime()>30*60000) invalid('Preview expired. Review the latest changes and try again.');
     const p=batch.payload, actual=new Map();
     for(const [ref,expected] of Object.entries(p.snapshot)) {
       const {rows} = await client.query('SELECT * FROM tenders WHERE upper(tender_id)=$1 FOR UPDATE', [ref.toUpperCase()]);
       const old = rows[0];
       if (rows.length > 1) invalid(`Multiple existing records match ${ref}`);
-      if((old?digest(old):null)!==expected) invalid('Tender records changed after preview; upload again to review the latest changes');
+      if((old?digest(old):null)!==expected) invalid('Tender records changed after preview. Review the latest changes and try again.');
       if(old) actual.set(ref,old.id);
     }
     for(const [key,expected] of Object.entries(p.criterionSnapshot)) {

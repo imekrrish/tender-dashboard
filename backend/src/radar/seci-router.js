@@ -2,25 +2,52 @@ import {Router} from 'express';
 import multer from 'multer';
 import {uuid,invalid} from './validation.js';
 import {seciUrl} from './seci-source.js';
-import {reviewWorkbook,previewReview,commitReview,findExistingTenders} from './seci-workflow.js';
+import {reviewWorkbook,previewReview,previewExtraction,commitReview,findExistingTenders} from './seci-workflow.js';
 import {catalogFields} from './bulk-upload.js';
 const run=fn=>(req,res,next)=>Promise.resolve(fn(req,res)).catch(next);
 export function createSeciRouter(pool) {
   const router=Router();
   router.get('/status',(req,res)=>res.json({configured:!!process.env.OPENAI_API_KEY,model:process.env.OPENAI_MODEL || 'gpt-4.1-mini'}));
   router.get('/jobs',run(async(req,res)=>res.json((await pool.query('SELECT id,source_url,tender_limit,status,progress,error,created_at,updated_at FROM radar_extraction_jobs ORDER BY created_at DESC LIMIT 20')).rows)));
+  async function queueJob(url, limit, batch) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(7042028)');
+      if (batch?.previousJobId) {
+        const next = (await client.query(`SELECT * FROM radar_extraction_jobs
+          WHERE result->'batch'->>'previousJobId'=$1 AND status<>'failed'
+          ORDER BY created_at DESC LIMIT 1`, [batch.previousJobId])).rows[0];
+        if (next) {await client.query('COMMIT');return next;}
+      }
+      const count = await client.query("SELECT count(*) AS total FROM radar_extraction_jobs WHERE status IN ('queued','running')");
+      if (Number(count.rows[0].total) >= 3) invalid('Three extraction jobs are already queued or running. Wait for one to finish');
+      const {rows} = await client.query('INSERT INTO radar_extraction_jobs(source_url,tender_limit,result) VALUES($1,$2,$3) RETURNING *',
+        [url,limit,batch ? JSON.stringify({batch}) : null]);
+      await client.query('COMMIT');
+      return rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {client.release();}
+  }
+
   router.post('/jobs',run(async(req,res)=>{
     if(!process.env.OPENAI_API_KEY) return res.status(503).json({error:'Set OPENAI_API_KEY on the backend before starting extraction'});
     const url=seciUrl(req.body.url),limit=req.body.limit??5;
     if(!Number.isInteger(limit) || limit<1 || limit>25) invalid('Select 1–25 tenders per extraction');
     if(!/^\/(tenders\/?$|tender-details\/)/.test(new URL(url).pathname)) invalid('Start from a tender listing or detail page');
-    const client=await pool.connect();
-    try {
-      await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(7042028)');
-      if(Number((await client.query("SELECT count(*) AS total FROM radar_extraction_jobs WHERE status IN ('queued','running')")).rows[0].total)>=3) invalid('Three extraction jobs are already queued or running. Wait for one to finish');
-      const row=(await client.query('INSERT INTO radar_extraction_jobs(source_url,tender_limit) VALUES($1,$2) RETURNING *',[url,limit])).rows[0];
-      await client.query('COMMIT');res.status(202).json(row);
-    }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+    res.status(202).json(await queueJob(url,limit));
+  }));
+  router.post('/jobs/:id/next',run(async(req,res)=>{
+    if(!process.env.OPENAI_API_KEY) return res.status(503).json({error:'Set OPENAI_API_KEY on the backend before starting extraction'});
+    const id = uuid(req.params.id);
+    const job = (await pool.query('SELECT * FROM radar_extraction_jobs WHERE id=$1',[id])).rows[0];
+    const batch = job?.result?.batch;
+    if (!batch || !['completed','partial','skipped'].includes(job.status)) invalid('Finish a listing batch before extracting the next one');
+    const offset = batch.offset + job.tender_limit;
+    if (offset >= batch.links.length) invalid('You have reached the end of this listing');
+    res.status(202).json(await queueJob(job.source_url,job.tender_limit,{links:batch.links,offset,previousJobId:id}));
   }));
   router.get('/jobs/:id',run(async(req,res)=>{
     const job=(await pool.query('SELECT * FROM radar_extraction_jobs WHERE id=$1',[uuid(req.params.id)])).rows[0];
@@ -69,6 +96,16 @@ export function createSeciRouter(pool) {
     res.setHeader('Content-Disposition',`attachment; filename="${req.params.kind}-review.xlsx"`);
     res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(reviewWorkbook(job,req.params.kind));
   }));
+  async function loadCatalogs() {
+    return Object.fromEntries(await Promise.all(Object.entries(catalogFields).map(async ([key,[table]]) => [
+      key,(await pool.query(`SELECT * FROM ${table}`)).rows,
+    ])));
+  }
+  router.post('/jobs/:id/import/preview',run(async(req,res)=>{
+    const job = (await pool.query('SELECT * FROM radar_extraction_jobs WHERE id=$1',[uuid(req.params.id)])).rows[0];
+    const decisions = readDecisions(req.body.decisions ?? {});
+    res.json(await previewExtraction(pool,job,req.body.selection,await loadCatalogs(),decisions));
+  }));
   const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:5*1024*1024,files:3,fields:1,fieldSize:4096}}).fields([{name:'tenders',maxCount:1},{name:'technical',maxCount:1},{name:'financial',maxCount:1}]);
   router.post('/review/preview',upload,run(async(req,res)=>{
     const files={};
@@ -77,7 +114,7 @@ export function createSeciRouter(pool) {
       if(!file || !/\.xlsx$/i.test(file.originalname)) invalid('Upload all three .xlsx review files together');
       files[key]=file.buffer;
     }
-    const catalogs=Object.fromEntries(await Promise.all(Object.entries(catalogFields).map(async([key,[table]])=>[key,(await pool.query(`SELECT * FROM ${table}`)).rows])));
+    const catalogs=await loadCatalogs();
     let decisions = {};
     if (req.body.decisions) {
       try {decisions = JSON.parse(req.body.decisions);} catch {invalid('Invalid duplicate decisions');}
