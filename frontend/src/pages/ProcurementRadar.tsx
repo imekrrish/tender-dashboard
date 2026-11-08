@@ -6,14 +6,13 @@ import { KpiCard } from '../components/dashboard/KpiCard';
 import { Sun, BatteryCharging, Hourglass, CheckCircle2 } from 'lucide-react';
 import './ProcurementRadar.css';
 import {SeciExtraction} from './SeciExtraction';
-import {SourceLink, tenderCapacity, TenderTables, type EligibilityEntry} from './TenderTables';
+import {eligibilityLabels, eligibilityValue, SourceLink, tenderCapacity, TenderTables, type EligibilityEntry} from './TenderTables';
 
 type RecordData = Record<string, string | number | boolean | null>;
 type Field = { type: string; required: boolean; generated: boolean };
 type Definition = { resources: Record<string, [string,string]>; schema: Record<string, Record<string,Field>>; statuses: string[] };
 type Tender = RecordData & { id: string; title: string; tender_id: string; current_status: string; tender_close_date: string };
-type Detail = {documents: RecordData[]; corrigenda: RecordData[]};
-type TenderPage = Tender & {eligibility_entries?: EligibilityEntry[]};
+type Detail = {documents: RecordData[]; corrigenda: RecordData[]; eligibility_entries: EligibilityEntry[]};
 type Catalogs = Record<string, RecordData[]>;
 const emptyFilters = {status:'Open',search:'',product_ids:'',scope_id:'',region_id:'',country_id:'',authority_id:''};
 const catalogFilters = [['scope_id','Contract Scope','scopes','scope_id'],['region_id','Region','regions','region_id'],['country_id','Country','countries','country_id'],['authority_id','Issuing Authority','authorities','authority_id']];
@@ -36,8 +35,9 @@ export function ProcurementRadar() {
   const [filters,setFilters] = useState(emptyFilters);
   const [catalogs,setCatalogs] = useState<Catalogs>({});
   const [statuses,setStatuses] = useState<string[]>([]);
-  const [rows,setRows] = useState<TenderPage[]>([]);
+  const [rows,setRows] = useState<Tender[]>([]);
   const [summary,setSummary] = useState<RecordData>({});
+  const [analytics,setAnalytics] = useState<Record<string,number|null>>();
   const [offset,setOffset] = useState(0);
   const [loading,setLoading] = useState(true);
   const [error,setError] = useState('');
@@ -60,9 +60,9 @@ export function ProcurementRadar() {
     return ()=> {active=false;};
   },[revision]);
   useEffect(()=> { const controller = new AbortController(); setLoading(true);setError('');
-    const timer = setTimeout(()=> api.get('/radar/tenders',{params:{...filters,offset,limit:50,include_eligibility:true},signal:controller.signal})
-      .then(({data})=> {setRows(data.data);setSummary(data.summary);})
-      .catch(e=> {if(!controller.signal.aborted) {setRows([]);setSummary({});setError(message(e));}})
+    const timer = setTimeout(()=> api.get('/radar/tenders',{params:{...filters,offset,limit:50,include_analytics:true},signal:controller.signal})
+      .then(({data})=> {setRows(data.data);setSummary(data.summary);setAnalytics(data.eligibility_analytics);})
+      .catch(e=> {if(!controller.signal.aborted) {setRows([]);setSummary({});setAnalytics(undefined);setError(message(e));}})
       .finally(()=> {if(!controller.signal.aborted)setLoading(false);}),200);
     return ()=> {clearTimeout(timer);controller.abort();};
   },[filters,offset,revision]);
@@ -133,6 +133,7 @@ export function ProcurementRadar() {
           <KpiCard label="Expiring in < 14 Days" value={loading?'…':`${number(summary.expiring)} Bids`} subtitle="Action on EMD / Bid bonds" icon={<Hourglass className="w-4 h-4"/>} accent="bg-rose-50 text-rose-600"/>
           <KpiCard label="Filtered Records" value={loading?'…':`${number(summary.total)} Tenders`} subtitle={filters.status==='Open'?'Default Filter: Open':`Status: ${filters.status}`} icon={<CheckCircle2 className="w-4 h-4"/>}/>
         </div>
+        <EligibilityAnalytics total={total} counts={analytics} loading={loading} failed={!!error}/>
         {Number(summary.imported_samples)>0&&<div className="radar-sample-note"><p>{number(summary.imported_samples)} sample records. Verify dates, eligibility and document links on the official portal.</p></div>}
         <details className="radar-notice"><summary>Bidder advisory</summary><p>{notice}</p></details>
         {error&&<div role="alert" className="radar-error">{error}<button onClick={()=>setRevision(x=>x+1)}>Retry</button></div>}
@@ -141,7 +142,6 @@ export function ProcurementRadar() {
             key:row.id, tenderId:row.tender_id, title:row.title, product:String(row.product ?? ''),
             capacity:tenderCapacity(row.storage_capacity_mw ?? row.total_capacity_mw,row.storage_capacity_mwh),
             status:row.current_status, deadline:date(row.tender_close_date), source:String(row.link_to_tender ?? ''),
-            eligibility:row.eligibility_entries,
           }))} loading={loading} empty="No tenders match these filters."
             renderDetails={id=><SavedTenderDetails key={id} tender={rows.find(row=>row.id===id)!}/>}/>
           <div className="radar-pagination"><span>{total?`${offset+1}–${Math.min(offset+rows.length,total)} of ${total}`:'0 Records'}</span><button disabled={!offset||loading} onClick={()=>setOffset(x=>Math.max(0,x-50))}>Previous</button><button disabled={offset+50>=total||loading} onClick={()=>setOffset(x=>x+50)}>Next</button></div>
@@ -171,6 +171,48 @@ export function ProcurementRadar() {
     })}</div>{adminError&&<p role="alert" className="radar-error">{adminError}</p>}<div className="radar-form-actions"><button type="button" onClick={()=>setEditor(null)}>Cancel</button><button className="radar-primary" disabled={busy}>{busy?'Saving…':'Save'}</button></div></form></div>}
   </div>;
 }
+const eligibilityCharts = [
+  {key:'technical',category:'Technical',benchmark:['median_capacity','Median minimum track record',' MW'],metrics:[
+    ['track_record','Project track record'], ['manufacturer','Manufacturer / OEM'], ['certifications','Certifications'],
+  ]},
+  {key:'financial',category:'Financial',benchmark:['median_security','Median performance guarantee','%'],metrics:[
+    ['bid_security','Bid security (EMD)'], ['turnover','Minimum turnover'], ['net_worth','Minimum net worth'], ['performance_security','Performance security'],
+  ]},
+  {key:'contractual',category:'General',benchmark:['median_ld_cap','Median liquidated damages cap','%'],metrics:[
+    ['liquidated_damages','Liquidated damages'], ['consortium','Consortium size limit'],
+  ]},
+];
+
+function EligibilityAnalytics({total,counts,loading,failed}: {
+  total:number; counts?:Record<string,number|null>; loading:boolean; failed:boolean;
+}) {
+  return <section className="radar-eligibility-analytics" aria-labelledby="eligibility-analytics-title" aria-busy={loading}>
+    <div className="radar-section-title"><div>
+      <h2 id="eligibility-analytics-title">Eligibility Analytics</h2>
+      <p>{loading ? 'Loading…' : failed ? 'Eligibility analytics are unavailable.' : total
+        ? `Requirements recorded across ${number(total)} matching tenders`
+        : 'No tenders match these filters.'}</p>
+    </div></div>
+    {!loading&&!failed&&total>0&&counts&&<div className="radar-eligibility-charts">
+      {eligibilityCharts.map(({key,category,metrics,benchmark:[field,label,unit]})=><article key={key} className="radar-eligibility-card">
+        <h3>{eligibilityLabels[category]}</h3>
+        <p><strong>{number(counts[key])}</strong> of {number(total)} tenders</p>
+        <ul>{metrics.map(([metric,label])=>{
+          const count = counts[`${key}_${metric}`] ?? 0;
+          return <li key={metric}>
+            <div><span>{label}</span><strong>{number(count)}</strong></div>
+            <progress value={count} max={total} aria-label={`${label}: ${count} of ${total} tenders`}/>
+          </li>;
+        })}</ul>
+        {counts[`${key}_${field}`]!=null&&<div className="radar-eligibility-benchmark">
+          <span>{label}</span><strong>{number(counts[`${key}_${field}`])}{unit}</strong>
+        </div>}
+      </article>)}
+    </div>}
+    {!loading&&!failed&&total>0&&counts&&<p className="radar-eligibility-note">Bars count recorded fields. Category totals also include sourced clauses. Medians use recorded numeric values.</p>}
+  </section>;
+}
+
 const expandedFields = [
   ['Reference','ref_number'], ['Issuing authority','authority'], ['Scope','scope'], ['Country','country'],
   ['State','state'], ['Capacity (MW)','total_capacity_mw'], ['Storage Power (MW)','storage_capacity_mw'],
@@ -191,8 +233,24 @@ function SavedTenderDetails({tender}: {tender:Tender}) {
     <dl>{expandedFields.filter(([,key])=>tender[key]!=null && tender[key]!=='').map(([label,key])=><div key={key}>
       <dt>{label}</dt><dd>{key==='tender_open_date' ? date(tender[key]) : String(tender[key])}</dd>
     </div>)}</dl>
+    {detail&&Object.entries(eligibilityLabels).map(([category,label])=>{
+      const entries = (detail.eligibility_entries ?? []).filter(entry=>entry.category===category);
+      if (!entries.length) return null;
+      return <details className="radar-tender-eligibility" key={category}>
+        <summary>{label} · {entries.length}</summary>
+        <ul>{entries.map(entry=>{
+          const value = eligibilityValue(entry);
+          return <li key={entry.id}><strong>{entry.requirement}</strong>{value!=null&&<> · {value}</>}
+            {entry.period&&<> · {entry.period}</>}
+            {entry.conditions&&<p>{entry.conditions}</p>}
+            {entry.evidence&&<p>Evidence · {entry.evidence}</p>}
+            {entry.source_url&&<> · <SourceLink url={entry.source_url} page={entry.page}/></>}
+          </li>;
+        })}</ul>
+      </details>;
+    })}
     <strong>Source documents</strong>
-    {failed ? <p>Could not load documents. Reopen the row to retry.</p> : !detail ? <p>Loading documents…</p> :
+    {failed ? <p>Could not load eligibility and documents. Reopen the row to retry.</p> : !detail ? <p>Loading documents…</p> :
       <ul>{detail.documents.map(doc=><li key={String(doc.doc_id)}>
         <SourceLink url={String(doc.document_bucket_url ?? '')} label={String(doc.document_title ?? 'Document')}/>
       </li>)}{detail.corrigenda.map((amendment,index)=><li key={index}>

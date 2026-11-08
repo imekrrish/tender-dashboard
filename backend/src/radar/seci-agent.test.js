@@ -5,7 +5,7 @@ import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
 import express from 'express';
 import {createSeciRouter} from './seci-router.js';
-import {dashboardWorkbook, withEligibility} from './tender-tables.js';
+import {dashboardWorkbook, eligibilityAnalyticsSql, withEligibility} from './tender-tables.js';
 import XLSX from 'xlsx';
 import {seciUrl,fetchSeci,parseListing,parseDetail,pageChunks,readPdf} from './seci-source.js';
 import {extractTenderSet} from './seci-jobs.js';
@@ -52,7 +52,14 @@ test('three workbooks import without approvals, preserve conditions and require 
   assert.equal(parseReviewFiles({...exported,tenders:legacy},cats()).tenders.length,1);
   assert.equal(parsed.summaries[0].fields.ld_cap_pct,5);
   const other=XLSX.read(exported.financial,{type:'buffer'});
-  assert.ok(other.Sheets['Other Eligibility']);
+  assert.ok(other.Sheets['Financial & Contractual']);
+  for (const oldName of ['Other Eligibility','Financial Eligibility']) {
+    const previous = XLSX.read(exported.financial,{type:'buffer'});
+    previous.Sheets[oldName] = previous.Sheets['Financial & Contractual'];
+    previous.SheetNames[0] = oldName;
+    const priorFiles = {...exported,financial:XLSX.write(previous,{type:'buffer',bookType:'xlsx'})};
+    assert.equal(parseReviewFiles(priorFiles,cats()).summaries[0].fields.emd_amount,25000);
+  }
   assert.ok(XLSX.utils.sheet_to_json(other.Sheets['Eligibility Summary'],{header:1})[0].includes('LD Cap (%)'));
   assert.equal(parsed.tenders.length,1);assert.equal(parsed.criteria.length,1);assert.match(parsed.criteria[0].conditions,/OR/);
   assert.equal(parsed.summaries[0].fields.emd_amount,25000);
@@ -204,9 +211,34 @@ test('review preview and commit persist tender/eligibility links, audit and idem
     assert.ok(savedRows[0].eligibility_entries.some(entry=>entry.category==='Technical' && entry.source_url===criterion.source_url && entry.page===1));
     assert.ok(savedRows[0].eligibility_entries.some(entry=>entry.category==='General' && Number(entry.value)===5));
     const dashboard = XLSX.read(dashboardWorkbook(savedRows),{type:'buffer'});
-    assert.deepEqual(dashboard.SheetNames,['Tenders','Technical Eligibility','Other Eligibility']);
+    assert.deepEqual(dashboard.SheetNames,['Tenders','Technical Eligibility','Financial & Contractual']);
     assert.equal(XLSX.utils.sheet_to_json(dashboard.Sheets['Tenders'])[0].TN_tenderID,tender.id);
-    assert.ok(XLSX.utils.sheet_to_json(dashboard.Sheets['Other Eligibility']).some(entry=>entry.Category==='Financial'));
+    const nonTechnical = XLSX.utils.sheet_to_json(dashboard.Sheets['Financial & Contractual']);
+    assert.deepEqual(new Set(nonTechnical.map(entry=>entry.Category)),new Set(['Financial','General']));
+    assert.ok(XLSX.utils.sheet_to_json(dashboard.Sheets['Technical Eligibility']).every(entry=>entry.Category==='Technical'));
+
+    const charts = eligibilityAnalyticsSql('FROM tenders t LEFT JOIN tender_eligibility e ON e.tender_id=t.id','t.id=$1');
+    const readCharts = async id => (await pool.query(charts,[id])).rows[0];
+    const counts = await readCharts(tender.id);
+    assert.equal(counts.technical,1);
+    assert.equal(counts.technical_certifications,1);
+    assert.equal(counts.technical_track_record,0);
+    assert.equal(counts.financial,1);
+    assert.equal(counts.financial_bid_security,1);
+    assert.equal(counts.contractual,1);
+    assert.equal(counts.contractual_median_ld_cap,5);
+    assert.equal((await readCharts(randomUUID())).technical,0);
+    await pool.exec('BEGIN');
+    try {
+      await pool.query("UPDATE tender_eligibility SET certifications='N/A', emd_amount=NULL, ld_cap_pct=NULL WHERE tender_id=$1",[tender.id]);
+      const clauseOnly = await readCharts(tender.id);
+      assert.equal(clauseOnly.technical,1);
+      assert.equal(clauseOnly.technical_certifications,0);
+      assert.equal(clauseOnly.financial,0);
+      assert.equal(clauseOnly.contractual,0);
+    } finally {
+      await pool.exec('ROLLBACK');
+    }
     assert.equal((await commitReview(pool,p.id)).already_imported,true);
     assert.equal((await previewReview(pool,exported,catalogs)).already_imported,true);
     assert.equal((await pool.query('SELECT * FROM tenders')).rows.length,1);
