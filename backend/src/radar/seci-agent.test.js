@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
+import express from 'express';
+import {createSeciRouter} from './seci-router.js';
 import XLSX from 'xlsx';
 import {seciUrl,fetchSeci,parseListing,parseDetail,pageChunks,readPdf} from './seci-source.js';
 import {extractTenderSet} from './seci-jobs.js';
 import {extractStructured} from './seci-ai.js';
-import {reviewWorkbook,parseReviewFiles,previewReview,commitReview,digest,tenderInternalId} from './seci-workflow.js';
+import {reviewWorkbook,parseReviewFiles,previewReview,previewExtraction,commitReview,digest,tenderInternalId} from './seci-workflow.js';
 
 const job={id:randomUUID(),source_url:'https://www.seci.co.in/tenders',created_at:'2026-11-06',status:'completed'};
 const criterion={criterion_id:digest('synthetic criterion'),tender_id:'SECI000001',category:'Technical',requirement:'Completed 10 MW solar project',threshold:10,unit:'MW',period:'Last 5 years',conditions:'One project OR two projects of 5 MW each; lead JV member qualifies',evidence:'Commissioning certificate',source_url:'https://www.seci.co.in/uploads/tenders/example.pdf',page:1,clause:'2.1',quote:'Completed 10 MW solar project'};
@@ -112,6 +114,24 @@ test('linked PDFs and page chunks run in parallel with a shared AI limit and sta
   assert.ok(result.warnings.some(warning => warning.includes('conflicting emd_amount')));
   assert.deepEqual(result.sources.filter(source => source.url?.endsWith('.pdf')).map(source => source.title),docs);
 });
+test('next five use the original listing order without loading the listing again', async () => {
+  const listing = Array.from({length:12}, (_,i) => `<a href="/tender-details/${i+1}">Tender ${i+1}</a>`).join('');
+  let listingReads = 0;
+  const options = {
+    get:async url => {
+      if (url === job.source_url) {listingReads++;return {url,buffer:Buffer.from(listing)};}
+      const number = new URL(url).pathname.split('/').at(-1);
+      return {url,buffer:Buffer.from(`<body>SECI${number.padStart(6,'0')}</body>`)};
+    },
+    extract:async () => ({tender:{},criteria:[],warnings:[]}),
+  };
+  const first = await extractTenderSet({...job,result:null,tender_limit:5},options);
+  const next = await extractTenderSet({...job,tender_limit:5,result:{batch:{...first.batch,offset:5}}},options);
+  assert.equal(listingReads,1);
+  assert.deepEqual(first.tenders.map(t=>t.tender_id),['SECI000001','SECI000002','SECI000003','SECI000004','SECI000005']);
+  assert.deepEqual(next.tenders.map(t=>t.tender_id),['SECI000006','SECI000007','SECI000008','SECI000009','SECI000010']);
+  assert.equal(next.batch.offset,5);
+});
 test('existing SECI IDs pause before AI calls, then skip or re-extract using the original internal ID', async () => {
   const existingId = randomUUID();
   const listing = '<a href="/tender-details/one">One</a><a href="/tender-details/two">Two</a>';
@@ -198,6 +218,56 @@ test('review preview and commit persist tender/eligibility links, audit and idem
     wrong.Sheets['Technical Eligibility'].P2.v=randomUUID();
     tampered.technical=XLSX.write(wrong,{type:'buffer',bookType:'xlsx'});
     await assert.rejects(()=>previewReview(pool,tampered,catalogs),/TN_tenderID does not match/);
+    const original = job.result.tenders[0];
+    const second = {...original,tender_id:'SECI000002',title:'Second tender',product:null};
+    const screenJob = {...job,id:randomUUID(),result:{...job.result,tenders:[original,second],batch:{
+      offset:0,links:Array.from({length:12},(_,i)=>`https://www.seci.co.in/tender-details/${i+1}`),
+    },criteria:[criterion,{...criterion,tender_id:second.tender_id,criterion_id:digest('second criterion')}],
+      sources:[...job.result.sources,{...job.result.sources[0],tender_id:second.tender_id}],
+    }};
+    await pool.query("INSERT INTO radar_extraction_jobs(id,source_url,tender_limit,status,result) VALUES($1,$2,5,'completed',$3)",
+      [screenJob.id,screenJob.source_url,JSON.stringify(screenJob.result)]);
+    const selection = [{tender_id:second.tender_id,corrections:{product:'Solar PV'}}];
+    await assert.rejects(()=>previewExtraction(pool,screenJob,[{tender_id:'SECI999999'}],catalogs),/Select tenders from this extraction/);
+    const screenPreview = await previewExtraction(pool,screenJob,selection,catalogs);
+    assert.equal(screenPreview.summary.new,1);
+    assert.equal(screenPreview.summary.criteria,1);
+    assert.equal(screenPreview.summary.documents,1);
+    await commitReview(pool,screenPreview.id);
+    assert.equal((await previewExtraction(pool,screenJob,selection,catalogs)).already_imported,true);
+    const saved = (await pool.query('SELECT * FROM tenders WHERE tender_id=$1',[second.tender_id])).rows[0];
+    assert.equal(saved.title,'Second tender');
+    assert.equal((await pool.query('SELECT title FROM tenders WHERE id=$1',[tender.id])).rows[0].title,'Reviewer corrected title');
+
+    const app = express();
+    app.use(express.json());
+    app.use(createSeciRouter({query:(...args)=>pool.query(...args),connect:async()=>({
+      query:(...args)=>pool.query(...args),release:()=>{},
+    })}));
+    const server = await new Promise(resolve => {const listener=app.listen(0,'127.0.0.1',()=>resolve(listener));});
+    const previousKey = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = 'test-only';
+    try {
+      const api = `http://127.0.0.1:${server.address().port}`;
+      const directResponse = await fetch(`${api}/jobs/${screenJob.id}/import/preview`,{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selection}),
+      });
+      assert.equal(directResponse.status,200);
+      assert.equal((await directResponse.json()).already_imported,true);
+      const next = async () => {
+        const response = await fetch(`${api}/jobs/${screenJob.id}/next`,{method:'POST'});
+        assert.equal(response.status,202);
+        return response.json();
+      };
+      const nextJob = await next();
+      assert.equal(nextJob.result.batch.offset,5);
+      assert.deepEqual(nextJob.result.batch.links,screenJob.result.batch.links);
+      assert.equal((await next()).id,nextJob.id);
+    } finally {
+      if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previousKey;
+      await new Promise(resolve=>server.close(resolve));
+    }
   } finally {await pool.close();}
 });
 test('commit rolls back if database records changed after preview',async()=>{

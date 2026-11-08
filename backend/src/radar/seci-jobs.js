@@ -125,7 +125,6 @@ async function extractTender({link, parsed, pageSha}, existing, options) {
 
   const pageSource = {tender_id:tenderId,url:link.url,title:'Tender detail page',sha256:pageSha,status:'Read',notes:''};
   callsRemaining--;
-  apply(await ask(parsed.text, pageSource), parsed.text, pageSource);
   sources.push(pageSource);
 
   const documents = parsed.documents.map(doc => {
@@ -137,6 +136,15 @@ async function extractTender({link, parsed, pageSha}, existing, options) {
     return source;
   });
   sources.push(...documents);
+  // Overlap the first document downloads with the detail-page AI request.
+  const [pageAnswer, firstDocuments] = await Promise.allSettled([
+    ask(parsed.text,pageSource),
+    Promise.allSettled(documents.slice(0,callsRemaining ? 2 : 0).map(source => prepareDocument(source,options))),
+  ]);
+  if (pageAnswer.status === 'rejected') throw pageAnswer.reason;
+  if (firstDocuments.status === 'rejected') throw firstDocuments.reason;
+  apply(pageAnswer.value,parsed.text,pageSource);
+
   function markForReview(source, notes) {
     source.status = 'Needs review';
     source.notes = notes;
@@ -152,7 +160,7 @@ async function extractTender({link, parsed, pageSha}, existing, options) {
       group.forEach(source => markForReview(source, callLimitWarning));
       continue;
     }
-    const prepared = await Promise.allSettled(group.map(source => prepareDocument(source, options)));
+    const prepared = offset === 0 ? firstDocuments.value : await Promise.allSettled(group.map(source => prepareDocument(source,options)));
     const plans = prepared.map((item,index) => {
       const source = group[index];
       if (item.status === 'rejected') {
@@ -203,16 +211,21 @@ export async function extractTenderSet(job, {
   if (!Number.isInteger(maxCalls) || maxCalls < 1 || maxCalls > 100) throw new Error('SECI_MAX_CALLS_PER_TENDER must be an integer from 1 to 100');
   if (!Number.isInteger(aiConcurrency) || aiConcurrency < 1 || aiConcurrency > 8) throw new Error('SECI_AI_CONCURRENCY must be an integer from 1 to 8');
 
-  const root = await get(job.source_url,{signal});
-  const links = new URL(job.source_url).pathname.startsWith('/tender-details/')
-    ? [{url:job.source_url}] : parseListing(root.buffer.toString(),root.url);
-  const selected = links.slice(0,job.tender_limit);
-  const result = {tenders:[],criteria:[],sources:[],warnings:[],discovered:links.length};
+  const direct = new URL(job.source_url).pathname.startsWith('/tender-details/');
+  let batch = job.result?.batch;
+  if (!direct && !batch) {
+    const root = await get(job.source_url,{signal});
+    batch = {offset:0,links:parseListing(root.buffer.toString(),root.url).map(link => link.url)};
+  }
+  const links = direct ? [job.source_url] : batch.links;
+  const offset = batch?.offset ?? 0;
+  const selected = links.slice(offset,offset + job.tender_limit).map(url => ({url}));
+  const result = {tenders:[],criteria:[],sources:[],warnings:[],discovered:links.length,...(batch ? {batch} : {})};
   await progress(`Checking SECI IDs for ${selected.length} tenders`);
   const pages = await mapConcurrent(selected,4,async link => {
     signal?.throwIfAborted();
     try {
-      const detail = link.url === root.url ? root : await get(link.url,{signal});
+      const detail = await get(link.url,{signal});
       return {link,parsed:parseDetail(detail.buffer.toString(),link.url),pageSha:digest(detail.buffer)};
     } catch (error) {
       return {link,error};

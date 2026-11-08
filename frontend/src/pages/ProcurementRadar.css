@@ -42,3 +42,7 @@
 .radar-criterion {padding:14px 0;border-bottom:1px solid #e2e8f0;line-height:1.5;}
 .radar-criterion p {margin:8px 0;}
 @media(max-width:800px){.radar-extract-form,.radar-extract-files{grid-template-columns:1fr;}.radar-extraction{padding:16px;}}
+
+.radar-seci-review-row {padding:12px 0;border-top:1px solid #e2e8f0;}
+.radar-extraction .radar-seci-select {display:flex;flex-direction:row;align-items:center;gap:10px;}
+.radar-seci-select input {flex-shrink:0;}
