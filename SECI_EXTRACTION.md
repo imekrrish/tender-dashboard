@@ -18,7 +18,7 @@ In **Master Tables → Tenders**, sign in with the existing admin PIN. The SECI 
 4. Leave the tenders you want selected and click **Import selected**. The server validates and imports their tender, eligibility and document rows in one transaction.
 5. Choose **Next batch** to continue through the saved listing. A first batch of five covers positions 1–5, and the next batch covers 6–10. Starting a fresh extraction loads a new listing snapshot.
 
-Excel exports and imports are available under the optional Excel controls. For edited workbooks, keep both IDs and headers, mark the rows you want to upload Approved, and upload all three files from the same extraction. The Excel preview can be reviewed before committing.
+Review Tenders, Technical Eligibility and Other Eligibility in the app. Expand a tender to see its details and linked documents. To edit in Excel, download the three extraction files, keep both IDs and the headers, then choose the files and click Import Excel. All rows are included by default. Existing tenders still prompt for a duplicate decision. The dashboard shows saved data in the same three views and downloads the filtered results as one Excel workbook with three sheets.
 
 Repeated confirmation or uploading exactly the same reviewed file contents does not duplicate records. Previews expire after 30 minutes. Changes to tender/criterion records after preview require a fresh upload. Original extraction results and reviewed payloads remain in PostgreSQL for audit. Corrections to an existing criterion must retain its Criterion ID. Omitted/rejected rows do not delete previously imported criteria; use the original reviewed row to correct a superseded condition. The original one-workbook imports remain available and unchanged.
 
@@ -29,7 +29,7 @@ Repeated confirmation or uploading exactly the same reviewed file contents does 
 - Maximum: 25 MB per source, 500 pages per text PDF, 12 documents per tender, and 30 OpenAI calls per tender (override `SECI_MAX_CALLS_PER_TENDER` with an integer from 1–100). Reaching any processing limit marks the job partial, with the affected source identified. Larger jobs incur more API usage; start with a small count.
 - A job has a one-hour processing deadline. Progress and heartbeat are persisted. A running job with no heartbeat for 15 minutes is marked failed; it is never silently retried after a server crash. Start a new extraction to retry.
 - OpenAI transient 429/5xx responses are retried up to twice. Incomplete/refused model outputs are rejected. Text-extracted eligibility excerpts are checked against the referenced physical page. Vision-derived evidence requires manual verification.
-- Date/title/reference fields come from HTML table labels where available; other metadata is AI extracted. Conflicting closing dates and identified amendments are flagged. The reviewer must resolve precedence before approval; the system does not make a bidder qualification decision.
+- Date/title/reference fields come from HTML table labels where available; other metadata is AI extracted. Conflicting closing dates and identified amendments are flagged. The reviewer must resolve precedence before import; the system does not make a bidder qualification decision.
 - Eligibility IDs persist in the review workbooks. Later extraction jobs may phrase the same condition differently: reconcile their proposed conditions before importing again. Exact-file deduplication is not semantic deduplication across independently generated jobs.
 
 ## API
@@ -45,4 +45,4 @@ All routes are under `/api/radar/admin/seci` and require the existing bearer adm
 
 ## Validation
 
-Run `npm test` and `npm run build`. Agent tests cover source restrictions, HTML dates and amendments, partial failures, schema/refusal handling, workbook approval, source evidence, database relationships, import idempotency and rollback on stale previews. Tests use a mocked OpenAI endpoint and synthetic workbooks, never a real API key. Live paid model quality should be evaluated against a reviewer-checked sample before operational use.
+Run `npm test` and `npm run build`. Agent tests cover source restrictions, HTML dates and amendments, partial failures, schema/refusal handling, workbook import without approval marks, source evidence, database relationships, import idempotency and rollback on stale previews. Tests use a mocked OpenAI endpoint and synthetic workbooks, never a real API key. Live paid model quality should be evaluated against a reviewer-checked sample before operational use.

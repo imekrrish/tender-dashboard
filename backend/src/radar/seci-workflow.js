@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {format, convert, rawRecord} from './reference-workbook.js';
 import {parseSeciSheet} from './seci-workbook.js';
 import {invalid, uuid, validate} from './validation.js';
-import {financialColumns, technicalColumns, detailHeaders, documentHeaders, isUnavailable} from './seci-columns.js';
+import {financialColumns, technicalColumns, legacyTechnicalColumns, otherColumns, detailHeaders, documentHeaders, isUnavailable} from './seci-columns.js';
 
 export const digest = value => createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex');
 export const reviewHeaders = ['Review Status','Reviewer Remarks'];
@@ -13,6 +13,7 @@ export const tenderHeaders = [...legacyTenderHeaders, 'TN_tenderID'];
 export const criterionHeaders = [...legacyCriterionHeaders, 'TN_tenderID'];
 const documentPath = url => new URL(url).pathname;
 const optional = value => isUnavailable(value) ? null : value;
+const exportHeaders = headers => headers.filter(header => !reviewHeaders.includes(header));
 
 export function tenderInternalId(tender) {
   if (tender.tn_tender_id) return tender.tn_tender_id;
@@ -33,14 +34,14 @@ export async function findExistingTenders(db, ids) {
   return byId;
 }
 
-function tenderCells(t, i, reviewStatus) {
+function tenderCells(t, i) {
   return [
     i+1, t.tender_id, t.ref_number, t.title, 'Solar Energy Corporation of India Limited (SECI)',
     t.scope, t.product, t.current_status, t.publication_date, t.closing_date, t.total_capacity_mw,
     t.storage_capacity_mwh, t.pv_type, t.module_tech, t.module_eff_pct, t.mounting_tech, t.storage_tech,
     t.country, t.state, t.city, t.postal_code, t.site_address, t.latitude, t.longitude,
     t.interconnection, t.substation_voltage_kv, yesNo(t.almm_required), yesNo(t.dcr_required),
-    t.url, t.analysis_tags, t.remarks, t.database_entry_date, 'OpenAI extraction', reviewStatus, null,
+    t.url, t.analysis_tags, t.remarks, t.database_entry_date, 'OpenAI extraction', null, null,
     tenderInternalId(t),
   ];
 }
@@ -56,35 +57,35 @@ function appendRows(wb, name, headers, rows) {
   XLSX.utils.book_append_sheet(wb, sheet, name);
 }
 
-function reviewTables(job, kind, status = 'Pending') {
+function reviewTables(job, kind) {
   const tables = [];
   const add = (name, headers, rows) => tables.push({name, headers, rows});
   const {tenders, criteria, sources} = job.result;
   const byId = new Map(tenders.map(t => [t.tender_id, t]));
   if (kind === 'tenders') {
-    add('Tenders Review', tenderHeaders, tenders.map((t,i) => tenderCells(t,i,status)));
+    add('Tenders Review', tenderHeaders, tenders.map((t,i) => tenderCells(t,i)));
     const documents = sources.filter(s => byId.has(s.tender_id) && s.url && documentPath(s.url).startsWith('/uploads/tenders/'));
     add('Documents', documentHeaders, documents.map(s => {
       const tender = byId.get(s.tender_id);
       const extension = documentPath(s.url).match(/\.([a-z0-9]+)$/i)?.[1]?.toUpperCase();
       return [s.tender_id, s.title, s.category, extension, tender.url, s.url, yesNo(s.is_corrigendum), s.published_date,
-        tenderInternalId(tender), status, null];
+        tenderInternalId(tender), null, null];
     }));
   } else {
     const financial = kind === 'financial';
-    add(financial ? 'Financial Eligibility' : 'Technical Eligibility', criterionHeaders,
-      criteria.filter(c => byId.has(c.tender_id) && (c.category === 'Financial') === financial).map(c => [
+    add(financial ? 'Other Eligibility' : 'Technical Eligibility', criterionHeaders,
+      criteria.filter(c => byId.has(c.tender_id) && (c.category !== 'Technical') === financial).map(c => [
         c.criterion_id, c.tender_id, c.category, c.requirement, c.threshold, c.unit, c.period, c.conditions,
-        c.evidence, c.source_url, c.page, c.clause, c.quote, status, null, tenderInternalId(byId.get(c.tender_id)),
+        c.evidence, c.source_url, c.page, c.clause, c.quote, null, null, tenderInternalId(byId.get(c.tender_id)),
       ]));
-    const columns = financial ? financialColumns : technicalColumns;
+    const columns = financial ? otherColumns : technicalColumns;
     add('Eligibility Summary', detailHeaders(columns), tenders.map(t => [
       t.tender_id,
       ...columns.map(([, key]) => t.eligibility?.[key] ?? (
         key === 'estimated_project_value' ? t.eligibility?.estimated_project_value_terms :
           key === 'performance_bg_pct' ? t.eligibility?.performance_bg_terms : null
       )),
-      tenderInternalId(t), status, null,
+      tenderInternalId(t), null, null,
     ]));
   }
   return tables;
@@ -93,11 +94,14 @@ function reviewTables(job, kind, status = 'Pending') {
 export function reviewWorkbook(job, kind) {
   const {sources} = job.result;
   const wb = XLSX.utils.book_new();
-  for (const {name, headers, rows} of reviewTables(job, kind)) appendRows(wb, name, headers, rows);
+  for (const {name, headers, rows} of reviewTables(job, kind)) {
+    const kept = exportHeaders(headers);
+    appendRows(wb, name, kept, rows.map(row => kept.map(header => row[headers.indexOf(header)])));
+  }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['Extraction ID', job.id], ['Source URL', job.source_url], ['Created', String(job.created_at)],
-    ['Instructions', 'Keep both IDs and all headers. NA means unavailable. Fill missing required fields, review sources and mark accepted rows Approved. Upload the three files together.'],
-    ['Amendments', 'Resolve superseded conditions before approval. Reject obsolete rows.'],
+    ['Instructions', 'Keep both IDs and all headers. NA means unavailable. To exclude a tender, remove its rows from all three files. Upload all three files from this extraction together.'],
+    ['Amendments', 'Check amendments against the linked source documents.'],
   ]), 'Extraction');
   const sourceRows = sources.length ? sources : [{status:'No documents found'}];
   const sourceHeaders = [...new Set(sourceRows.flatMap(row => Object.keys(row)))];
@@ -105,27 +109,30 @@ export function reviewWorkbook(job, kind) {
   return XLSX.write(wb, {type:'buffer',bookType:'xlsx'});
 }
 
-function readReviewSheet(wb, name, headers, legacyHeaders) {
+function readReviewSheet(wb, name, headers, legacyHeaders, previousHeaders) {
   const sheet = wb.Sheets[name];
   if (!sheet?.['!ref']) invalid(`Missing ${name} sheet`);
   const range = XLSX.utils.decode_range(sheet['!ref']);
-  if (range.e.r > 5000 || range.e.c >= headers.length) invalid(`${name}: maximum 5,000 rows. Keep template columns.`);
+  if (range.e.r > 5000 || range.e.c >= Math.max(headers.length, previousHeaders?.length ?? 0)) invalid(`${name}: maximum 5,000 rows. Keep template columns.`);
   for (const [address, cell] of Object.entries(sheet)) {
     if (!address.startsWith('!') && cell.f) invalid(`${name}: formulas are not accepted. Paste values instead.`);
   }
   const [header, ...rows] = XLSX.utils.sheet_to_json(sheet, {header:1, defval:null, blankrows:true});
-  const matches = expected => header.length === expected.length && expected.every((value, i) => header[i] === value);
-  const legacy = !!legacyHeaders && matches(legacyHeaders);
-  if (!legacy && !matches(headers)) invalid(`${name}: keep the original headers and order`);
+  const matches = expected => expected && [expected, exportHeaders(expected)].some(candidate =>
+    header.length === candidate.length && candidate.every((value, i) => header[i] === value));
+  const layout = [headers, previousHeaders, legacyHeaders].find(matches);
+  if (!layout) invalid(`${name}: keep the original headers and order`);
+  const positions = layout.map(key => header.indexOf(key));
   const data = [];
   const numberFormats = new Map();
   rows.forEach((row, index) => {
     if (row.every(value => value == null || value === '')) return;
-    const cells = row.map(optional);
+    const cells = positions.map(col => optional(row[col]));
     data.push(cells);
-    numberFormats.set(cells, row.map((_, col) => sheet[XLSX.utils.encode_cell({r:range.s.r + index + 1, c:range.s.c + col})]?.z));
+    numberFormats.set(cells, positions.map(col => col < 0 ? undefined :
+      sheet[XLSX.utils.encode_cell({r:range.s.r + index + 1, c:range.s.c + col})]?.z));
   });
-  return {legacy, rows:data, numberFormats};
+  return {legacy:layout === legacyHeaders, previous:layout === previousHeaders, rows:data, numberFormats};
 }
 
 function readReview(buffer, name, headers, legacyHeaders) {
@@ -134,17 +141,18 @@ function readReview(buffer, name, headers, legacyHeaders) {
   const meta = wb.Sheets.Extraction;
   if (!meta) invalid('Missing Extraction sheet');
   const info = XLSX.utils.sheet_to_json(meta, {header:1, defval:null});
-  return {...readReviewSheet(wb, name, headers, legacyHeaders), wb, jobId:info.find(row => row[0] === 'Extraction ID')?.[1]};
+  const sheetName = name === 'Other Eligibility' && !wb.Sheets[name] && wb.Sheets['Financial Eligibility'] ? 'Financial Eligibility' : name;
+  return {...readReviewSheet(wb, sheetName, headers, legacyHeaders), wb, jobId:info.find(row => row[0] === 'Extraction ID')?.[1]};
 }
-function approved(row,index,name) {
+function included(row,index,name) {
   const status=String(row[index]||'').trim().toLowerCase();
   if(!['approved','pending','rejected',''].includes(status)) invalid(`${name}: review status must be Approved, Pending or Rejected`);
-  return status==='approved';
+  return status!=='rejected';
 }
 export function parseReviewFiles(files,catalogs) {
   const t=readReview(files.tenders,'Tenders Review',tenderHeaders,legacyTenderHeaders);
   const technical=readReview(files.technical,'Technical Eligibility',criterionHeaders,legacyCriterionHeaders);
-  const financial=readReview(files.financial,'Financial Eligibility',criterionHeaders,legacyCriterionHeaders);
+  const financial=readReview(files.financial,'Other Eligibility',criterionHeaders,legacyCriterionHeaders);
   return parseReviewRows(t,technical,financial,catalogs);
 }
 
@@ -154,12 +162,12 @@ function parseReviewRows(t,technical,financial,catalogs) {
   if ([technical, financial].some(file => file.legacy !== t.legacy)) invalid('Use three workbooks of the same format');
   const links = [];
   const link = (external, internal) => {
-    if (typeof external !== 'string' || !external.trim()) invalid('Approved rows require Tender ID');
+    if (typeof external !== 'string' || !external.trim()) invalid('Rows require Tender ID');
     const tenderId = external.trim().toUpperCase();
     if (!t.legacy) links.push({tenderId, internalId:uuid(internal)});
     return tenderId;
   };
-  const selected=t.rows.filter(row=>approved(row,33,'Tenders Review'));
+  const selected=t.rows.filter(row=>included(row,33,'Tenders Review'));
   for (const row of selected) row[1] = link(row[1], row[35]);
   const tenderSheet = XLSX.utils.aoa_to_sheet([format[0].headers, ...selected.map(row => row.slice(0,33))], {cellDates:true});
   selected.forEach((row, index) => t.numberFormats.get(row)?.slice(0,33).forEach((numberFormat, col) => {
@@ -169,12 +177,12 @@ function parseReviewRows(t,technical,financial,catalogs) {
   const tenders = selected.length ? parseSeciSheet(tenderSheet, catalogs) : [];
   const criteria=[], seen=new Set();
   for(const [kind,data] of [['technical',technical],['financial',financial]]) for(const row of data.rows) {
-    if(!approved(row,13,kind)) continue;
+    if(!included(row,13,kind)) continue;
     const [id,tender_id,category,requirement,threshold,unit,period,conditions,evidence,source_url,page,clause,quote,,reviewer_remarks,internal]=row;
-    if(!['Technical','Financial','General'].includes(category) || (kind==='financial')!==(category==='Financial')) invalid('Eligibility category must match its workbook');
-    if(typeof tender_id!=='string' || !tender_id.trim() || typeof requirement!=='string' || !requirement.trim()) invalid('Approved eligibility requires Tender ID and Requirement');
+    if(!['Technical','Financial','General'].includes(category) || (category==='Financial' && kind!=='financial') || (category==='Technical' && kind!=='technical')) invalid('Eligibility category must match its workbook');
+    if(typeof tender_id!=='string' || !tender_id.trim() || typeof requirement!=='string' || !requirement.trim()) invalid('Eligibility requires Tender ID and Requirement');
     for(const text of [requirement,unit,period,conditions,evidence,source_url,clause,quote,reviewer_remarks]) if(text!=null && (typeof text!=='string' || text.length>20000)) invalid('Eligibility text must be at most 20,000 characters');
-    if(!source_url || !quote) invalid('Approved eligibility needs a source URL and excerpt');
+    if(!source_url || !quote) invalid('Eligibility needs a source URL and excerpt');
     try {if(new URL(source_url).protocol!=='https:')invalid('Source URL must use HTTPS');}catch{invalid('Invalid source URL');}
     if(threshold!=null && (typeof threshold!=='number' || !Number.isFinite(threshold))) invalid('Threshold must be a number or blank; put units in Unit');
     if(page!=null && (!Number.isInteger(page) || page<1 || page>10000)) invalid('PDF Page must be a positive whole number or blank');
@@ -187,12 +195,13 @@ function parseReviewRows(t,technical,financial,catalogs) {
   const documents = [];
   let supplementarySkipped = 0;
   if (!t.legacy) {
-    for (const [file, columns] of [[technical, technicalColumns], [financial, financialColumns]]) {
-      const sheet = file.extra ?? readReviewSheet(file.wb, 'Eligibility Summary', detailHeaders(columns));
+    for (const [file, current, previous] of [[technical, technicalColumns, legacyTechnicalColumns], [financial, otherColumns, financialColumns]]) {
+      const sheet = file.extra ?? readReviewSheet(file.wb, 'Eligibility Summary', detailHeaders(current), undefined, detailHeaders(previous));
+      const columns = sheet.previous ? previous : current;
       const seen = new Set();
       const statusIndex = columns.length + 2;
       for (const row of sheet.rows) {
-        if (!approved(row, statusIndex, 'Eligibility Summary')) { supplementarySkipped++; continue; }
+        if (!included(row, statusIndex, 'Eligibility Summary')) { supplementarySkipped++; continue; }
         const tenderId = link(row[0], row[statusIndex - 1]);
         if (seen.has(tenderId)) invalid(`Duplicate eligibility summary for ${tenderId}`);
         seen.add(tenderId);
@@ -215,13 +224,13 @@ function parseReviewRows(t,technical,financial,catalogs) {
     const sheet = t.extra ?? readReviewSheet(t.wb, 'Documents', documentHeaders);
     const seen = new Set();
     for (const row of sheet.rows) {
-      if (!approved(row, 9, 'Documents')) { supplementarySkipped++; continue; }
+      if (!included(row, 9, 'Documents')) { supplementarySkipped++; continue; }
       const tenderId = link(row[0], row[8]);
       const [ ,title, category, ,portal, direct, corrigendum, published] = row;
       if (corrigendum != null && !/^(yes|no|true|false)$/i.test(String(corrigendum))) invalid('Is Corrigendum must be Yes, No or NA');
       if (published != null && Number.isNaN(Date.parse(String(published)))) invalid('Published Date must be a valid date or NA');
       const data = validate('tender_documents', {document_title:title, doc_type:category, document_bucket_url:direct ?? portal}, true);
-      if (!data.document_title || !data.document_bucket_url) invalid('Approved documents require Document Title and a link');
+      if (!data.document_title || !data.document_bucket_url) invalid('Documents require Document Title and a link');
       const key = JSON.stringify([tenderId, data.document_bucket_url]);
       if (seen.has(key)) invalid(`Duplicate document URL for ${tenderId}`);
       seen.add(key);
@@ -229,7 +238,7 @@ function parseReviewRows(t,technical,financial,catalogs) {
         source_data:rawRecord(documentHeaders,row)});
     }
   }
-  if (!tenders.length && !criteria.length && !summaries.size && !documents.length) invalid('No approved rows found. Review the files and mark accepted rows Approved');
+  if (!tenders.length && !criteria.length && !summaries.size && !documents.length) invalid('No rows to import');
   const reviews = Object.fromEntries(selected.map(row => [String(row[1]), {status:'Approved', remarks:row[34] ?? null}]));
   return {
     jobId:t.jobId, tenders:[...tenders], catalogs:tenders.catalogs || [], criteria, reviews, links,
@@ -270,7 +279,7 @@ export async function previewExtraction(db, job, selection, catalogs, decisions 
   const selectionKey = tenders.map(tender => [tender.tender_id,chosen.get(tender.tender_id)]);
   const reviewedJob = {...job,result:{...job.result,tenders}};
   const tables = kind => {
-    const [main, extra] = reviewTables(reviewedJob,kind,'Approved');
+    const [main, extra] = reviewTables(reviewedJob,kind);
     const data = table => ({rows:table.rows.map(row => row.map(optional)),numberFormats:new Map(),legacy:false});
     return {...data(main),jobId:job.id,extra:data(extra)};
   };
@@ -324,7 +333,7 @@ async function previewPrepared(db, job, payload, identity, decisions) {
   const activeIds = ids.filter(id => !skipped.has(id));
   const tenderIds = new Set(payload.tenders.map(row => row.tender_id));
   for (const id of activeIds) {
-    if (!byId.has(id) && !tenderIds.has(id)) invalid(`Approve tender ${id} first, or include it in this upload`);
+    if (!byId.has(id) && !tenderIds.has(id)) invalid(`Include tender ${id} in this upload or import it first`);
   }
   payload.catalogs = payload.catalogs.filter(({pk, data}) => payload.tenders.some(row => row[pk] === data[pk]));
   payload.internalIds = Object.fromEntries(activeIds.map(id => [id, byId.get(id)?.id ?? tenderInternalId(allowed.get(id))]));
