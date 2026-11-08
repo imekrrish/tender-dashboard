@@ -3,7 +3,7 @@ export { schema };
 export const statusSql = "CASE WHEN t.current_status = 'Draft' THEN 'Draft' WHEN t.tender_close_date < now() THEN 'Archived' WHEN t.tender_open_date > CURRENT_DATE THEN 'Upcoming' ELSE 'Open' END";
 export const publicStatuses = ['Open','Upcoming','Archived'];
 export const statuses = ['Draft','Open','Under Pre-Bid','Under Evaluation','Financial Evaluation','Awarded','Retendered','Cancelled'];
-const mounting = ['Fixed Tilt','Single-Axis Tracker','Dual-Axis Tracker','Pure Floater (HDPE)','Elevated Agri Structure','Ballasted Rooftop','Rooftop','Containerized BESS','N/A'];
+export const mountingTechnologies = ['Fixed Tilt','Single-Axis Tracker','Dual-Axis Tracker','Pure Floater (HDPE)','Elevated Agri Structure','Ballasted Rooftop','Rooftop','Containerized BESS','N/A'];
 export function invalid(message) { const e = new Error(message); e.status = 400; throw e; }
 export function uuid(value) { if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) invalid('Invalid record ID'); return value; }
 export function validate(table, input, partial = false) {
@@ -24,7 +24,7 @@ export function validate(table, input, partial = false) {
     if (type.startsWith('VARCHAR') && value.length > Number(type.match(/\d+/)[0])) invalid(`${key} is too long`);
     if (/DATE|TIMESTAMPTZ/.test(type) && Number.isNaN(Date.parse(value))) invalid(`${key} must be a valid date`);
     if (type === 'tender_status_enum' && !statuses.includes(value)) invalid('Invalid tender status');
-    if (type === 'mounting_tech_enum' && !mounting.includes(value)) invalid('Invalid mounting technology');
+    if (type === 'mounting_tech_enum' && !mountingTechnologies.includes(value)) invalid('Invalid mounting technology');
     if (key.endsWith('_url') || key === 'link_to_tender') { try { if (!['https:','http:'].includes(new URL(value).protocol)) invalid('URL must use HTTP(S)'); } catch { invalid(`${key} must be a valid HTTP(S) URL`); } }
     out[key] = value;
   }

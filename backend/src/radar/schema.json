@@ -251,7 +251,7 @@
       "generated": false
     },
     "module_tech": {
-      "type": "VARCHAR(100)",
+      "type": "TEXT",
       "required": false,
       "generated": false
     },
@@ -306,7 +306,7 @@
       "generated": false
     },
     "interconnection": {
-      "type": "VARCHAR(100)",
+      "type": "TEXT",
       "required": false,
       "generated": false
     },
